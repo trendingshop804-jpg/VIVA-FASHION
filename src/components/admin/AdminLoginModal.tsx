@@ -1,32 +1,58 @@
-import React, { useState } from 'react';
-import { Lock, Mail, ArrowRight, ShieldCheck, Store } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Lock, Mail, ArrowRight, ShieldCheck, Store, Loader2 } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
+import { useAuth } from '../../context/AuthContext';
 import { Logo } from '../common/Logo';
 
 export const AdminLoginModal: React.FC = () => {
   const { loginAdmin, setIsAdminMode } = useAdmin();
-  const [email, setEmail] = useState('admin@vivafashion.com');
-  const [password, setPassword] = useState('admin123');
+  const { login, isAdmin, isAuthenticated, isLoading: authLoading } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated && isAdmin && !authLoading) {
+      window.history.pushState({}, '', '/admin');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+  }, [isAuthenticated, isAdmin, authLoading]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    setIsSubmitting(true);
     setError('');
 
-    const success = await loginAdmin(email, password);
-    setIsLoading(false);
-    if (!success) {
-      setError('Invalid admin credentials. (Hint: use admin@vivafashion.com / admin123)');
+    const result = await login(email, password);
+    setIsSubmitting(false);
+
+    if (!result.success) {
+      setError(result.error || 'Authentication failed.');
+      return;
     }
+
+    if (!result.isAdmin) {
+      setError('This account does not have administrator privileges.');
+      return;
+    }
+
+    window.history.pushState({}, '', '/admin');
+    window.dispatchEvent(new PopStateEvent('popstate'));
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#191E28] flex items-center justify-center">
+        <Loader2 size={32} className="animate-spin text-[#C27D6E]" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#191E28] flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-[#FAF7F2] rounded-2xl shadow-2xl border border-[#DEC3B5] overflow-hidden p-6 sm:p-8 space-y-6">
         
-        {/* Top Header */}
         <div className="text-center space-y-2">
           <Logo size="md" className="mx-auto" />
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#F5EBE6] text-[#A66355] text-[10px] font-bold uppercase tracking-wider mt-2">
@@ -35,7 +61,7 @@ export const AdminLoginModal: React.FC = () => {
           </div>
           <h2 className="text-xl font-bold text-[#191E28] font-serif">Admin Authentication</h2>
           <p className="text-xs text-[#555E6C]">
-            Sign in to manage Kurtis, Shawls, Leggings, orders, and customer analytics.
+            Sign in with your administrator account to manage the store.
           </p>
         </div>
 
@@ -80,18 +106,22 @@ export const AdminLoginModal: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-[#FAF4EC] p-3 rounded-lg border border-[#DEC3B5]/60 text-[11px] text-[#555E6C] flex items-center justify-between">
-            <span>Demo: <strong>admin@vivafashion.com</strong></span>
-            <span>Pass: <strong>admin123</strong></span>
-          </div>
-
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isSubmitting}
             className="w-full bg-[#191E28] hover:bg-[#C27D6E] text-white py-3 rounded-lg text-xs font-semibold tracking-[0.16em] uppercase flex items-center justify-center gap-2 transition-all shadow-md disabled:opacity-75"
           >
-            {isLoading ? 'Verifying...' : 'Sign In to Dashboard'}
-            <ArrowRight size={14} />
+            {isSubmitting ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                <span>Verifying...</span>
+              </>
+            ) : (
+              <>
+                <span>Sign In to Dashboard</span>
+                <ArrowRight size={14} />
+              </>
+            )}
           </button>
         </form>
 
@@ -99,7 +129,8 @@ export const AdminLoginModal: React.FC = () => {
           <button
             onClick={() => {
               setIsAdminMode(false);
-              window.location.hash = '';
+              window.history.pushState({}, '', '/');
+              window.dispatchEvent(new PopStateEvent('popstate'));
             }}
             className="inline-flex items-center gap-1.5 text-xs text-[#A66355] font-semibold hover:text-[#191E28] transition-colors"
           >

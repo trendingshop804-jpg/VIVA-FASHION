@@ -54,23 +54,33 @@ export const AdminProducts: React.FC = () => {
   }, [products, searchTerm, selectedCategory, stockFilter]);
 
   const handleDelete = async (productId: string) => {
-    await StoreService.deleteProduct(productId);
-    await refreshProducts();
+    const res = await StoreService.deleteProduct(productId);
     setDeleteConfirmId(null);
+
+    if (!res.success) {
+      showToast(res.error || 'Failed to delete product from database.', 'warn');
+      return;
+    }
+
+    await refreshProducts();
     showToast('Product deleted from store catalog', 'info');
   };
 
   const handleDuplicate = async (product: Product) => {
-    const duplicated: Partial<Product> = {
-      ...product,
-      id: undefined,
-      name: `${product.name} (Copy)`,
-      slug: `${product.slug}-copy-${Date.now().toString().slice(-4)}`,
-      sku: `${product.sku}-CP`,
-    };
-    await StoreService.saveProduct(duplicated);
-    await refreshProducts();
-    showToast(`Duplicated "${product.name}"`, 'success');
+    try {
+      const duplicated: Partial<Product> = {
+        ...product,
+        id: undefined,
+        name: `${product.name} (Copy)`,
+        slug: `${product.slug}-copy-${Date.now().toString().slice(-4)}`,
+        sku: `${product.sku}-CP`,
+      };
+      await StoreService.saveProduct(duplicated);
+      await refreshProducts();
+      showToast(`Duplicated "${product.name}"`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to duplicate product', 'warn');
+    }
   };
 
   const toggleSelectAll = () => {
@@ -89,12 +99,18 @@ export const AdminProducts: React.FC = () => {
 
   const handleBulkDelete = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedProductIds.length} selected products?`)) return;
+    let failCount = 0;
     for (const id of selectedProductIds) {
-      await StoreService.deleteProduct(id);
+      const res = await StoreService.deleteProduct(id);
+      if (!res.success) failCount++;
     }
     await refreshProducts();
     setSelectedProductIds([]);
-    showToast('Selected products deleted', 'info');
+    if (failCount > 0) {
+      showToast(`Completed bulk delete with ${failCount} errors.`, 'warn');
+    } else {
+      showToast('Selected products deleted from store catalog', 'info');
+    }
   };
 
   return (

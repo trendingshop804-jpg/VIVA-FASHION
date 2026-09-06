@@ -25,10 +25,28 @@ export const AdminLoginModal: React.FC = () => {
     setError('');
 
     const result = await login(email, password);
+
+    if (result.success && result.isAdmin) {
+      setIsSubmitting(false);
+      setIsAdminMode(true);
+      window.history.pushState({}, '', '/admin');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      return;
+    }
+
+    // Fallback to local AdminContext authentication if Supabase is offline or using demo admin credentials
+    const fallbackSuccess = await loginAdmin(email, password);
     setIsSubmitting(false);
 
+    if (fallbackSuccess) {
+      setIsAdminMode(true);
+      window.history.pushState({}, '', '/admin');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      return;
+    }
+
     if (!result.success) {
-      setError(result.error || 'Authentication failed.');
+      setError(result.error || 'Authentication failed. Please check your credentials.');
       return;
     }
 
@@ -37,6 +55,7 @@ export const AdminLoginModal: React.FC = () => {
       return;
     }
 
+    setIsAdminMode(true);
     window.history.pushState({}, '', '/admin');
     window.dispatchEvent(new PopStateEvent('popstate'));
   };

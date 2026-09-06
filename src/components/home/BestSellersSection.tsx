@@ -12,11 +12,6 @@ export const BestSellersSection: React.FC = () => {
   const { products: adminProducts } = useAdmin();
   const { activeConfig } = useCMS();
   const bestSellers = activeConfig?.bestSellers;
-
-  if (bestSellers && bestSellers.isVisible === false) {
-    return null;
-  }
-  
   const allProducts = adminProducts.length > 0 ? adminProducts : INITIAL_PRODUCTS;
 
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
@@ -79,6 +74,10 @@ export const BestSellersSection: React.FC = () => {
       return true;
     });
   }, [allProducts, selectedCategory, selectedSizes, selectedColors, maxPrice]);
+
+  if (bestSellers && bestSellers.isVisible === false) {
+    return null;
+  }
 
   const scrollCarousel = (direction: 'left' | 'right') => {
     if (carouselRef.current) {

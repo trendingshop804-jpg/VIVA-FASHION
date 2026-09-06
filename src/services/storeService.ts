@@ -571,27 +571,32 @@ export const INITIAL_REVIEWS: CustomerReview[] = [
   },
 ];
 
-// Helper to enforce image matching category
+function isUuid(id?: string): boolean {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
+function generateUuid(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+// Helper to ensure fallback default images only if missing or broken
 function enforceCategoryImages(products: Product[]): Product[] {
   return products.map(p => {
-    if (p.category === 'kurtis') {
-      const isKurtiImg = p.image.includes('1617627143750') || p.image.includes('1583391733956') || p.image.includes('1610030469983') || p.image.includes('1594463750939');
-      if (!isKurtiImg) {
-        p.image = KURTI_IMAGES.defaultKurti;
-        p.images = [KURTI_IMAGES.defaultKurti];
-      }
-    } else if (p.category === 'shawls') {
-      const isShawlImg = p.image.includes('1601244005535') || p.image.includes('1609357605129') || p.image.includes('1612722432474');
-      if (!isShawlImg) {
-        p.image = SHAWL_IMAGES.defaultShawl;
-        p.images = [SHAWL_IMAGES.defaultShawl];
-      }
-    } else if (p.category === 'leggings') {
-      const isLeggingImg = p.image.includes('1506629082955') || p.image.includes('1552902865') || p.image.includes('1556909114');
-      if (!isLeggingImg) {
-        p.image = LEGGING_IMAGES.defaultLegging;
-        p.images = [LEGGING_IMAGES.defaultLegging];
-      }
+    if (!p.image || p.image === '' || p.image === 'undefined' || p.image === 'null') {
+      if (p.category === 'kurtis') p.image = KURTI_IMAGES.defaultKurti;
+      else if (p.category === 'shawls') p.image = SHAWL_IMAGES.defaultShawl;
+      else if (p.category === 'leggings') p.image = LEGGING_IMAGES.defaultLegging;
+    }
+    if (!p.images || !Array.isArray(p.images) || p.images.length === 0) {
+      p.images = [p.image];
     }
     return p;
   });
@@ -669,8 +674,8 @@ export const StoreService = {
   },
 
   async saveProduct(product: Partial<Product>): Promise<Product> {
-    const isNew = !product.id || product.id.startsWith('temp-') || product.id.startsWith('prod-');
-    const id = isNew ? `prod-${Date.now()}` : product.id!;
+    const isNew = !product.id || !isUuid(product.id);
+    const id = isNew ? generateUuid() : product.id!;
 
     const imagesList = product.images && product.images.length > 0
       ? product.images
@@ -683,9 +688,9 @@ export const StoreService = {
       sku: product.sku || `SKU-${Date.now().toString().slice(-4)}`,
       brand: product.brand || 'Viva Fashion',
       category: (product.category || 'kurtis') as ProductCategory,
-      price: product.price || 999,
-      salePrice: product.salePrice,
-      originalPrice: product.salePrice || product.price,
+      price: Number(product.price || 999),
+      salePrice: product.salePrice ? Number(product.salePrice) : undefined,
+      originalPrice: product.salePrice ? Number(product.salePrice) : Number(product.price || 999),
       stock: product.stock ?? 20,
       rating: product.rating || 5.0,
       reviewCount: product.reviewCount || 0,
@@ -713,61 +718,64 @@ export const StoreService = {
       isActive: product.isActive !== false,
     };
 
-    // Update local storage
+    // Database payload using exact schema columns (omitting 'brand' column which does not exist in DB)
+    const dbPayload = {
+      id: newProduct.id,
+      name: newProduct.name,
+      slug: newProduct.slug,
+      sku: newProduct.sku,
+      category: newProduct.category,
+      price: newProduct.price,
+      sale_price: newProduct.salePrice || null,
+      stock: newProduct.stock,
+      description: newProduct.description || '',
+      fabric: newProduct.fabric || null,
+      fit: newProduct.fit || null,
+      sleeve_type: newProduct.sleeveType || null,
+      length: newProduct.length || null,
+      neck_type: newProduct.neckType || null,
+      pattern: newProduct.pattern || null,
+      occasion: newProduct.occasion || null,
+      stretch: newProduct.stretch || null,
+      waist_type: newProduct.waistType || null,
+      work_embroidery: newProduct.workEmbroidery || null,
+      colors: newProduct.colors,
+      sizes: newProduct.sizes,
+      images: newProduct.images,
+      featured: newProduct.isFeatured,
+      bestseller: newProduct.isBestSeller,
+      new_arrival: newProduct.isNewArrival,
+      is_sale: newProduct.isSale,
+      is_active: newProduct.isActive,
+    };
+
+    const { error } = await supabase.from('products').upsert(dbPayload);
+    if (error) {
+      console.error('Supabase saveProduct error:', error);
+      throw new Error(`Failed to save product to database: ${error.message}`);
+    }
+
+    // Update local cache after database write succeeds
     const currentProducts = await this.fetchProducts();
     const updated = isNew
       ? [newProduct, ...currentProducts]
-      : currentProducts.map(p => p.id === id ? newProduct : p);
+      : currentProducts.map(p => (p.id === id ? newProduct : p));
 
     localStorage.setItem('vf_products', JSON.stringify(updated));
-
-    // Try Supabase insert/update
-    try {
-      await supabase.from('products').upsert({
-        id: newProduct.id,
-        name: newProduct.name,
-        slug: newProduct.slug,
-        sku: newProduct.sku,
-        brand: newProduct.brand,
-        category: newProduct.category,
-        price: newProduct.price,
-        sale_price: newProduct.salePrice,
-        stock: newProduct.stock,
-        description: newProduct.description,
-        fabric: newProduct.fabric,
-        fit: newProduct.fit,
-        sleeve_type: newProduct.sleeveType,
-        length: newProduct.length,
-        neck_type: newProduct.neckType,
-        pattern: newProduct.pattern,
-        occasion: newProduct.occasion,
-        stretch: newProduct.stretch,
-        waist_type: newProduct.waistType,
-        work_embroidery: newProduct.workEmbroidery,
-        colors: newProduct.colors,
-        sizes: newProduct.sizes,
-        images: newProduct.images,
-        featured: newProduct.isFeatured,
-        bestseller: newProduct.isBestSeller,
-        new_arrival: newProduct.isNewArrival,
-        is_sale: newProduct.isSale,
-        is_active: newProduct.isActive,
-      });
-    } catch {}
-
     return newProduct;
   },
 
-  async deleteProduct(productId: string): Promise<boolean> {
+  async deleteProduct(productId: string): Promise<{ success: boolean; error?: string }> {
+    const { error } = await supabase.from('products').delete().eq('id', productId);
+    if (error) {
+      console.error('Supabase deleteProduct error:', error);
+      return { success: false, error: error.message };
+    }
+
     const currentProducts = await this.fetchProducts();
     const updated = currentProducts.filter(p => p.id !== productId);
     localStorage.setItem('vf_products', JSON.stringify(updated));
-
-    try {
-      await supabase.from('products').delete().eq('id', productId);
-    } catch {}
-
-    return true;
+    return { success: true };
   },
 
   // Orders

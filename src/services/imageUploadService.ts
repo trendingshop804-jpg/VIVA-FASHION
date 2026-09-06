@@ -1,64 +1,90 @@
 import { supabase } from '../lib/supabase';
 
 const BUCKET_NAME = 'product-images';
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB limit
 
 export const ImageUploadService = {
   /**
-   * Initialize the storage bucket (creates if not exists).
-   * Called once on admin mount.
+   * Initialize the storage bucket if missing.
    */
-  async ensureBucket(): Promise<void> {
+  async ensureBucket(): Promise<boolean> {
     try {
-      const { data: buckets } = await supabase.storage.listBuckets();
-      const exists = buckets?.some(b => b.name === BUCKET_NAME);
+      const { data: buckets, error: listErr } = await supabase.storage.listBuckets();
+      const exists = !listErr && buckets?.some(b => b.name === BUCKET_NAME);
       if (!exists) {
         await supabase.storage.createBucket(BUCKET_NAME, {
           public: true,
-          fileSizeLimit: 5 * 1024 * 1024, // 5MB
+          fileSizeLimit: MAX_FILE_SIZE_BYTES,
           allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'],
         });
       }
-    } catch (err) {
-      console.warn('Storage bucket init skipped (may already exist):', err);
+      return true;
+    } catch {
+      return false;
     }
   },
 
   /**
+   * Validate image file type and size.
+   */
+  validateImageFile(file: File): { valid: boolean; error?: string } {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type.toLowerCase())) {
+      return { valid: false, error: 'Invalid file format. Please upload JPG, PNG, or WEBP images.' };
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return { valid: false, error: 'File size exceeds 5MB limit. Please upload a smaller image.' };
+    }
+    return { valid: true };
+  },
+
+  /**
+   * Legacy validator helper
+   */
+  isValidImageFile(file: File): boolean {
+    return this.validateImageFile(file).valid;
+  },
+
+  /**
    * Upload a single file to Supabase Storage.
-   * Returns the public URL of the uploaded image.
+   * Returns genuine public URL or throws error if upload fails.
    */
   async uploadImage(file: File, productId: string): Promise<string> {
+    const check = this.validateImageFile(file);
+    if (!check.valid) {
+      throw new Error(check.error || 'Invalid file.');
+    }
+
+    await this.ensureBucket();
+
     const timestamp = Date.now();
     const safeName = file.name
       .replace(/[^a-zA-Z0-9._-]/g, '_')
       .replace(/_{2,}/g, '_');
     const filePath = `${productId}/${timestamp}_${safeName}`;
 
-    // Try Supabase upload
-    try {
-      const { data, error } = await supabase.storage
-        .from(BUCKET_NAME)
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false,
-          contentType: file.type,
-        });
+    const { data, error } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: file.type,
+      });
 
-      if (error) {
-        console.error('Supabase upload error:', error);
-        return URL.createObjectURL(file);
-      }
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from(BUCKET_NAME)
-        .getPublicUrl(data.path);
-
-      return urlData.publicUrl;
-    } catch (err) {
-      console.warn('Upload failed, using local preview:', err);
-      return URL.createObjectURL(file);
+    if (error) {
+      console.error('Supabase storage upload failed:', error);
+      throw new Error(`Supabase Storage Upload Failed: ${error.message}`);
     }
+
+    const { data: urlData } = supabase.storage
+      .from(BUCKET_NAME)
+      .getPublicUrl(data.path);
+
+    if (!urlData?.publicUrl) {
+      throw new Error('Failed to retrieve public URL from Supabase Storage.');
+    }
+
+    return urlData.publicUrl;
   },
 
   /**
@@ -117,22 +143,14 @@ export const ImageUploadService = {
   },
 
   /**
-   * Validate file type before upload.
-   */
-  isValidImageFile(file: File): boolean {
-    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    return allowed.includes(file.type);
-  },
-
-  /**
-   * Create a preview URL for immediate display before upload completes.
+   * Create a local preview URL for instant UI feedback before upload.
    */
   createPreviewUrl(file: File): string {
     return URL.createObjectURL(file);
   },
 
   /**
-   * Revoke a blob preview URL to free memory.
+   * Revoke a blob preview URL to free browser memory.
    */
   revokePreviewUrl(url: string): void {
     if (url.startsWith('blob:')) {
@@ -142,8 +160,9 @@ export const ImageUploadService = {
 };
 
 export async function handleImageFileUpload(file: File, folder = 'cms'): Promise<string> {
-  if (!ImageUploadService.isValidImageFile(file)) {
-    alert('Please select a valid image file (JPG, PNG, WEBP).');
+  const check = ImageUploadService.validateImageFile(file);
+  if (!check.valid) {
+    alert(check.error);
     return '';
   }
   return await ImageUploadService.uploadImage(file, folder);

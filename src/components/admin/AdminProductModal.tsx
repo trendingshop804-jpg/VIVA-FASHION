@@ -8,7 +8,9 @@ import {
   ArrowLeft,
   ArrowRight,
   Info,
-  Sparkles
+  Sparkles,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import type { Product, ProductCategory } from '../../types';
 import { StoreService } from '../../services/storeService';
@@ -46,6 +48,7 @@ export const AdminProductModal: React.FC<AdminProductModalProps> = ({ product, o
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<Partial<Product>>({
     name: '',
@@ -118,15 +121,21 @@ export const AdminProductModal: React.FC<AdminProductModalProps> = ({ product, o
 
   // Handle local File Selection (Click or Drag & Drop)
   const handleFileSelect = async (files: FileList | File[]) => {
-    const fileArray = Array.from(files).filter(f => ImageUploadService.isValidImageFile(f));
-    if (fileArray.length === 0) {
-      showToast('Please select valid JPG, PNG, or WEBP image files.', 'warn');
+    setFormError(null);
+    const fileArray = Array.from(files);
+    
+    // Validate each file
+    const invalidFile = fileArray.find(f => !ImageUploadService.isValidImageFile(f));
+    if (invalidFile) {
+      const check = ImageUploadService.validateImageFile(invalidFile);
+      setFormError(check.error || 'Please select valid JPG, PNG, or WEBP image files (under 5MB).');
+      showToast(check.error || 'Invalid file format or size.', 'warn');
       return;
     }
 
     setUploadingFiles(true);
     try {
-      const tempId = product?.id || `temp-${Date.now()}`;
+      const tempId = product?.id || `upload-${Date.now()}`;
       const newUrls = await ImageUploadService.uploadMultipleImages(fileArray, tempId);
 
       setImageUrls(prev => {
@@ -135,9 +144,12 @@ export const AdminProductModal: React.FC<AdminProductModalProps> = ({ product, o
       });
 
       setPendingFiles(prev => [...prev, ...fileArray]);
-      showToast(`Uploaded ${newUrls.length} image(s)`, 'success');
-    } catch {
-      showToast('Error uploading image files', 'warn');
+      showToast(`Uploaded ${newUrls.length} image(s) to Supabase Storage!`, 'success');
+    } catch (err: any) {
+      console.error('File upload error:', err);
+      const errMsg = err?.message || 'Error uploading image files to storage.';
+      setFormError(errMsg);
+      showToast(errMsg, 'warn');
     } finally {
       setUploadingFiles(false);
     }
@@ -202,35 +214,61 @@ export const AdminProductModal: React.FC<AdminProductModalProps> = ({ product, o
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.price) {
-      alert('Please enter Product Name and Price');
+    setFormError(null);
+
+    // Strict Field Validations
+    if (!formData.name || !formData.name.trim()) {
+      setFormError('Please enter a valid Product Name.');
       return;
     }
 
-    if (imageUrls.length === 0) {
-      alert('Please upload at least one product image.');
+    if (formData.price === undefined || Number(formData.price) <= 0) {
+      setFormError('Please enter a valid positive Product Price.');
+      return;
+    }
+
+    if (formData.stock === undefined || Number(formData.stock) < 0) {
+      setFormError('Please enter a valid Stock quantity (0 or greater).');
+      return;
+    }
+
+    if (!imageUrls || imageUrls.length === 0) {
+      setFormError('Please upload at least one product image before saving.');
+      return;
+    }
+
+    const cleanImageUrls = imageUrls.filter(url => url && !url.startsWith('blob:'));
+    if (cleanImageUrls.length === 0) {
+      setFormError('Image upload to storage is incomplete. Please select valid images and wait for upload.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const primaryUrl = imageUrls[primaryImageIndex] || imageUrls[0];
-      const secondUrl = imageUrls[1] || undefined;
+      const primaryUrl = cleanImageUrls[primaryImageIndex] || cleanImageUrls[0];
+      const secondUrl = cleanImageUrls[1] || undefined;
 
       const finalProduct: Partial<Product> = {
         ...formData,
+        name: formData.name.trim(),
+        price: Number(formData.price),
+        salePrice: formData.salePrice ? Number(formData.salePrice) : undefined,
+        stock: Number(formData.stock),
         image: primaryUrl,
         secondaryImage: secondUrl,
-        images: imageUrls,
+        images: cleanImageUrls,
       };
 
       await StoreService.saveProduct(finalProduct);
       await refreshProducts();
-      showToast(product ? 'Product updated successfully' : 'Product added to catalog', 'success');
+      showToast(product ? `Product "${finalProduct.name}" updated!` : `Product "${finalProduct.name}" added to catalog!`, 'success');
       onSaved();
       onClose();
-    } catch {
-      showToast('Failed to save product', 'warn');
+    } catch (err: any) {
+      console.error('Submit product error:', err);
+      const errMsg = err?.message || 'Failed to save product to database.';
+      setFormError(errMsg);
+      showToast(errMsg, 'warn');
     } finally {
       setIsSubmitting(false);
     }
@@ -278,6 +316,13 @@ export const AdminProductModal: React.FC<AdminProductModalProps> = ({ product, o
           {/* Form Content */}
           <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-6 max-h-[80vh] overflow-y-auto text-xs">
             
+            {formError && (
+              <div className="bg-red-50 p-3.5 rounded-xl border border-red-200 text-red-700 flex items-center gap-2.5 text-xs font-semibold shadow-2xs">
+                <AlertCircle size={18} className="text-red-600 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
+
             {/* Section 1: Basic Information */}
             <div className="bg-white p-4 rounded-xl border border-[#DEC3B5]/60 space-y-4">
               <h4 className="font-bold uppercase tracking-wider text-[#A66355] text-[11px] border-b border-[#EAE3D9] pb-1">
@@ -823,16 +868,24 @@ export const AdminProductModal: React.FC<AdminProductModalProps> = ({ product, o
               <button
                 type="button"
                 onClick={onClose}
-                className="px-5 py-2.5 rounded-lg border border-[#DEC3B5] text-xs font-semibold text-[#191E28] hover:bg-[#EAD7CD]"
+                disabled={isSubmitting || uploadingFiles}
+                className="px-5 py-2.5 rounded-lg border border-[#DEC3B5] text-xs font-semibold text-[#191E28] hover:bg-[#EAD7CD] disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="bg-[#191E28] hover:bg-[#C27D6E] text-white px-6 py-2.5 rounded-lg text-xs font-semibold tracking-wider uppercase transition-colors shadow-md disabled:opacity-75"
+                disabled={isSubmitting || uploadingFiles}
+                className="bg-[#191E28] hover:bg-[#C27D6E] text-white px-6 py-2.5 rounded-lg text-xs font-semibold tracking-wider uppercase transition-all shadow-md disabled:opacity-75 flex items-center gap-2"
               >
-                {isSubmitting ? 'Saving to Catalog...' : product ? 'Save Product Changes' : 'Publish Product'}
+                {isSubmitting || uploadingFiles ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>{uploadingFiles ? 'Uploading Images...' : 'Saving to Database...'}</span>
+                  </>
+                ) : (
+                  <span>{product ? 'Save Product Changes' : 'Publish Product'}</span>
+                )}
               </button>
             </div>
 

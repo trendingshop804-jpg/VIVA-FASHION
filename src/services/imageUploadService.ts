@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
 
-const BUCKET_NAME = 'product-images';
-const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB limit
+const BUCKET_NAME = import.meta.env.VITE_STORAGE_BUCKET || 'product-images';
+const MAX_FILE_SIZE_BYTES = parseInt(import.meta.env.VITE_STORAGE_FILE_SIZE_LIMIT || '5242880');
 
 export const ImageUploadService = {
   /**
@@ -10,16 +10,33 @@ export const ImageUploadService = {
   async ensureBucket(): Promise<boolean> {
     try {
       const { data: buckets, error: listErr } = await supabase.storage.listBuckets();
-      const exists = !listErr && buckets?.some(b => b.name === BUCKET_NAME);
-      if (!exists) {
-        await supabase.storage.createBucket(BUCKET_NAME, {
+      
+      if (listErr) {
+        console.error('Failed to list buckets:', listErr);
+        return false;
+      }
+
+      const bucketExists = buckets?.some(b => b.name === BUCKET_NAME);
+      
+      if (!bucketExists) {
+        console.log(`Bucket "${BUCKET_NAME}" not found. Attempting to create...`);
+        const { data: newBucket, error: createErr } = await supabase.storage.createBucket(BUCKET_NAME, {
           public: true,
           fileSizeLimit: MAX_FILE_SIZE_BYTES,
           allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'],
         });
+
+        if (createErr) {
+          console.error(`Failed to create bucket "${BUCKET_NAME}":`, createErr);
+          throw new Error(`Failed to create storage bucket: ${createErr.message}`);
+        }
+        console.log('Bucket created successfully:', newBucket);
+      } else {
+        console.log(`Bucket "${BUCKET_NAME}" already exists.`);
       }
       return true;
-    } catch {
+    } catch (err) {
+      console.error('Error in ensureBucket:', err);
       return false;
     }
   },
@@ -33,7 +50,7 @@ export const ImageUploadService = {
       return { valid: false, error: 'Invalid file format. Please upload JPG, PNG, or WEBP images.' };
     }
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      return { valid: false, error: 'File size exceeds 5MB limit. Please upload a smaller image.' };
+      return { valid: false, error: `File size exceeds ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB limit. Please upload a smaller image.` };
     }
     return { valid: true };
   },
@@ -55,7 +72,11 @@ export const ImageUploadService = {
       throw new Error(check.error || 'Invalid file.');
     }
 
-    await this.ensureBucket();
+    // Ensure bucket exists before uploading
+    const bucketReady = await this.ensureBucket();
+    if (!bucketReady) {
+      throw new Error(`Storage bucket "${BUCKET_NAME}" is not available. Please check Supabase configuration.`);
+    }
 
     const timestamp = Date.now();
     const safeName = file.name
@@ -63,28 +84,33 @@ export const ImageUploadService = {
       .replace(/_{2,}/g, '_');
     const filePath = `${productId}/${timestamp}_${safeName}`;
 
-    const { data, error } = await supabase.storage
-      .from(BUCKET_NAME)
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: true,
-        contentType: file.type,
-      });
+    try {
+      const { data, error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: file.type,
+        });
 
-    if (error) {
-      console.error('Supabase storage upload failed:', error);
-      throw new Error(`Supabase Storage Upload Failed: ${error.message}`);
+      if (error) {
+        console.error('Supabase storage upload failed:', error);
+        throw new Error(`Supabase Storage Upload Failed: ${error.message}`);
+      }
+
+      const { data: urlData } = supabase.storage
+        .from(BUCKET_NAME)
+        .getPublicUrl(data.path);
+
+      if (!urlData?.publicUrl) {
+        throw new Error('Failed to retrieve public URL from Supabase Storage.');
+      }
+
+      return urlData.publicUrl;
+    } catch (err) {
+      console.error('Upload error:', err);
+      throw err;
     }
-
-    const { data: urlData } = supabase.storage
-      .from(BUCKET_NAME)
-      .getPublicUrl(data.path);
-
-    if (!urlData?.publicUrl) {
-      throw new Error('Failed to retrieve public URL from Supabase Storage.');
-    }
-
-    return urlData.publicUrl;
   },
 
   /**
@@ -104,21 +130,18 @@ export const ImageUploadService = {
    */
   async deleteImage(imageUrl: string): Promise<boolean> {
     try {
-      const bucketPath = imageUrl.split(`/storage/v1/object/public/${BUCKET_NAME}/`);
-      if (bucketPath.length < 2) return false;
+      const urlObj = new URL(imageUrl);
+      const pathname = urlObj.pathname;
+      const parts = pathname.split('/storage/v1/object/public/');
+      if (parts.length < 2) return false;
 
-      const filePath = decodeURIComponent(bucketPath[1]);
+      const filePath = parts[1].replace(BUCKET_NAME + '/', '');
       const { error } = await supabase.storage
         .from(BUCKET_NAME)
         .remove([filePath]);
 
-      if (error) {
-        console.error('Delete error:', error);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.warn('Delete image failed:', err);
+      return !error;
+    } catch {
       return false;
     }
   },
@@ -160,10 +183,5 @@ export const ImageUploadService = {
 };
 
 export async function handleImageFileUpload(file: File, folder = 'cms'): Promise<string> {
-  const check = ImageUploadService.validateImageFile(file);
-  if (!check.valid) {
-    alert(check.error);
-    return '';
-  }
-  return await ImageUploadService.uploadImage(file, folder);
+  return ImageUploadService.uploadImage(file, folder);
 }

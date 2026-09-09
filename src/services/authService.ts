@@ -151,4 +151,109 @@ export const AuthService = {
       return { success: false, session: null, error: error.message };
     }
   },
+
+  // ============ ADMIN MANAGEMENT ============
+
+  // Fetch all admin users
+  async fetchAdminUsers(): Promise<UserProfile[]> {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'admin')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error: any) {
+      console.error('Error fetching admin users:', error.message);
+      return [];
+    }
+  },
+
+  // Create a new admin user
+  async createAdminUser({ email, password, name, phone }: {
+    email: string;
+    password: string;
+    name: string;
+    phone?: string;
+  }) {
+    try {
+      // 1. Create auth user
+      const { data: { user }, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { name, phone },
+        },
+      });
+
+      if (authError) throw authError;
+      if (!user) throw new Error('Failed to create user');
+
+      // 2. Create admin profile
+      const profileResult = await profileService.createProfile(user.id, {
+        email,
+        name,
+        phone,
+        role: 'admin',
+        status: 'active',
+      });
+
+      if (!profileResult.success) throw new Error('Failed to create admin profile');
+
+      return {
+        success: true,
+        profile: profileResult.data,
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Error creating admin user:', error.message);
+      return {
+        success: false,
+        profile: null,
+        error: error.message,
+      };
+    }
+  },
+
+  // Update admin status (active/inactive)
+  async updateAdminStatus(userId: string, status: 'active' | 'inactive') {
+    try {
+      const result = await profileService.updateProfile(userId, { status });
+      if (!result.success) throw new Error('Failed to update admin status');
+      
+      return {
+        success: true,
+        data: result.data,
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Error updating admin status:', error.message);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  },
+
+  // Remove admin privileges (downgrade to user)
+  async removeAdmin(userId: string) {
+    try {
+      const result = await profileService.updateProfile(userId, { role: 'user' });
+      if (!result.success) throw new Error('Failed to remove admin privileges');
+      
+      return {
+        success: true,
+        data: result.data,
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Error removing admin:', error.message);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  },
 };

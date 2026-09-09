@@ -6,37 +6,16 @@ const MAX_FILE_SIZE_BYTES = parseInt(import.meta.env.VITE_STORAGE_FILE_SIZE_LIMI
 export const ImageUploadService = {
   /**
    * Initialize the storage bucket if missing.
+   * Note: listBuckets() requires service role key, not anon key
    */
   async ensureBucket(): Promise<boolean> {
     try {
-      const { data: buckets, error: listErr } = await supabase.storage.listBuckets();
-      
-      if (listErr) {
-        console.error('Failed to list buckets:', listErr);
-        return false;
-      }
-
-      const bucketExists = buckets?.some(b => b.name === BUCKET_NAME);
-      
-      if (!bucketExists) {
-        console.log(`Bucket "${BUCKET_NAME}" not found. Attempting to create...`);
-        const { data: newBucket, error: createErr } = await supabase.storage.createBucket(BUCKET_NAME, {
-          public: true,
-          fileSizeLimit: MAX_FILE_SIZE_BYTES,
-          allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'],
-        });
-
-        if (createErr) {
-          console.error(`Failed to create bucket "${BUCKET_NAME}":`, createErr);
-          throw new Error(`Failed to create storage bucket: ${createErr.message}`);
-        }
-        console.log('Bucket created successfully:', newBucket);
-      } else {
-        console.log(`Bucket "${BUCKET_NAME}" already exists.`);
-      }
+      // Skip listBuckets check - requires service role key which client doesn't have
+      // Bucket must exist in Supabase dashboard
+      console.log(`Using bucket: "${BUCKET_NAME}" (must exist in Supabase)`);
       return true;
     } catch (err) {
-      console.error('Error in ensureBucket:', err);
+      console.error('Error checking bucket:', err);
       return false;
     }
   },
@@ -72,12 +51,6 @@ export const ImageUploadService = {
       throw new Error(check.error || 'Invalid file.');
     }
 
-    // Ensure bucket exists before uploading
-    const bucketReady = await this.ensureBucket();
-    if (!bucketReady) {
-      throw new Error(`Storage bucket "${BUCKET_NAME}" is not available. Please check Supabase configuration.`);
-    }
-
     const timestamp = Date.now();
     const safeName = file.name
       .replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -85,6 +58,8 @@ export const ImageUploadService = {
     const filePath = `${productId}/${timestamp}_${safeName}`;
 
     try {
+      console.log(`Uploading to bucket: ${BUCKET_NAME}, path: ${filePath}`);
+      
       const { data, error } = await supabase.storage
         .from(BUCKET_NAME)
         .upload(filePath, file, {
@@ -95,7 +70,21 @@ export const ImageUploadService = {
 
       if (error) {
         console.error('Supabase storage upload failed:', error);
-        throw new Error(`Supabase Storage Upload Failed: ${error.message}`);
+        
+        // Check if bucket doesn't exist
+        if (error.message.includes('Bucket not found') || error.message.includes('404') || error.message.includes('not found')) {
+          throw new Error(
+            `❌ Storage bucket "${BUCKET_NAME}" does not exist.\n\n` +
+            `✅ FIX: Create it in Supabase Dashboard:\n` +
+            `1. Go to Storage section\n` +
+            `2. Click "New bucket"\n` +
+            `3. Name: ${BUCKET_NAME}\n` +
+            `4. Toggle ON "Public bucket"\n` +
+            `5. Click "Create bucket"`
+          );
+        }
+        
+        throw new Error(`Upload failed: ${error.message}`);
       }
 
       const { data: urlData } = supabase.storage
@@ -106,9 +95,10 @@ export const ImageUploadService = {
         throw new Error('Failed to retrieve public URL from Supabase Storage.');
       }
 
+      console.log('✅ Upload successful:', urlData.publicUrl);
       return urlData.publicUrl;
-    } catch (err) {
-      console.error('Upload error:', err);
+    } catch (err: any) {
+      console.error('❌ Upload error:', err);
       throw err;
     }
   },
@@ -130,18 +120,21 @@ export const ImageUploadService = {
    */
   async deleteImage(imageUrl: string): Promise<boolean> {
     try {
-      const urlObj = new URL(imageUrl);
-      const pathname = urlObj.pathname;
-      const parts = pathname.split('/storage/v1/object/public/');
-      if (parts.length < 2) return false;
+      const bucketPath = imageUrl.split(`/storage/v1/object/public/${BUCKET_NAME}/`);
+      if (bucketPath.length < 2) return false;
 
-      const filePath = parts[1].replace(BUCKET_NAME + '/', '');
+      const filePath = decodeURIComponent(bucketPath[1]);
       const { error } = await supabase.storage
         .from(BUCKET_NAME)
         .remove([filePath]);
 
-      return !error;
-    } catch {
+      if (error) {
+        console.error('Delete error:', error);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn('Delete image failed:', err);
       return false;
     }
   },

@@ -3,6 +3,20 @@ import { supabase } from '../lib/supabase';
 const BUCKET_NAME = import.meta.env.VITE_STORAGE_BUCKET || 'product-images';
 const MAX_FILE_SIZE_BYTES = parseInt(import.meta.env.VITE_STORAGE_FILE_SIZE_LIMIT || '5242880');
 
+/**
+ * Get the currently authenticated Supabase user.
+ * Returns null if no active session (e.g. admin using only local auth).
+ */
+async function getSessionUser(): Promise<{ id: string; email?: string } | null> {
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data?.user) return null;
+    return data.user;
+  } catch {
+    return null;
+  }
+}
+
 export const ImageUploadService = {
   /**
    * Initialize the storage bucket if missing.
@@ -51,6 +65,21 @@ export const ImageUploadService = {
       throw new Error(check.error || 'Invalid file.');
     }
 
+    // ── Session guard ────────────────────────────────────────────────────────
+    // RLS policies on storage.objects require an authenticated Supabase session.
+    // If the admin is only locally authenticated (localStorage flag) but has no
+    // Supabase JWT, every upload will be rejected with an RLS policy violation.
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
+      throw new Error(
+        'Upload failed: Not signed in to Supabase. ' +
+        'Please sign out and sign back in using your admin email and password. ' +
+        'Local admin mode does not create a Supabase session — a real sign-in is required for Storage uploads.'
+      );
+    }
+    console.log(`[ImageUpload] Session verified for user: ${sessionUser.email ?? sessionUser.id}`);
+    // ─────────────────────────────────────────────────────────────────────────
+
     const timestamp = Date.now();
     const safeName = file.name
       .replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -71,16 +100,30 @@ export const ImageUploadService = {
       if (error) {
         console.error('Supabase storage upload failed:', error);
         
-        // Check if bucket doesn't exist
-        if (error.message.includes('Bucket not found') || error.message.includes('404') || error.message.includes('not found')) {
+        // RLS policy violation — most common cause for admins
+        if (
+          error.message.includes('row-level security') ||
+          error.message.includes('policy') ||
+          error.message.includes('403') ||
+          error.message.includes('Unauthorized') ||
+          error.message.includes('security policy')
+        ) {
           throw new Error(
-            `❌ Storage bucket "${BUCKET_NAME}" does not exist.\n\n` +
-            `✅ FIX: Create it in Supabase Dashboard:\n` +
-            `1. Go to Storage section\n` +
-            `2. Click "New bucket"\n` +
-            `3. Name: ${BUCKET_NAME}\n` +
-            `4. Toggle ON "Public bucket"\n` +
-            `5. Click "Create bucket"`
+            'Upload blocked by Supabase Storage RLS policy. ' +
+            `Your profile (${sessionUser.email ?? sessionUser.id}) must have role="admin" and status="active" ` +
+            'in the profiles table. Sign out, update your profile row in Supabase, then sign back in.'
+          );
+        }
+
+        // Bucket missing
+        if (
+          error.message.includes('Bucket not found') ||
+          error.message.includes('404') ||
+          error.message.includes('not found')
+        ) {
+          throw new Error(
+            `Storage bucket "${BUCKET_NAME}" does not exist. ` +
+            `Create it in Supabase Dashboard → Storage → New bucket → name: "${BUCKET_NAME}" → Public ON.`
           );
         }
         

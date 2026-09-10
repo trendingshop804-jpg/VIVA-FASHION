@@ -51,20 +51,30 @@ export const AuthModal: React.FC = () => {
 
   const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password || !name) return;
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long.');
+    const cleanName = name.trim();
+    const cleanEmail = email.trim();
+
+    if (!cleanName) {
+      setError('Please enter your full name.');
+      return;
+    }
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!password || password.length < 6) {
+      setError('Password must contain at least 6 characters.');
       return;
     }
 
     setError(null);
     setIsSubmitting(true);
 
-    const res = await signup(email, password, name, phone);
+    const res = await signup(cleanEmail, password, cleanName, phone);
     setIsSubmitting(false);
 
     if (res.success) {
-      showToast(`Account created successfully! Welcome, ${name}.`, 'success');
+      showToast(`Account created successfully! Welcome, ${cleanName}.`, 'success');
       handleClose();
     } else {
       setError(res.error || 'Failed to create account.');

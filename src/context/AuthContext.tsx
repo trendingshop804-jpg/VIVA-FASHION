@@ -139,7 +139,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.location.hash = '';
   };
 
-  const isAdmin = Boolean(profile && profile.role === 'admin' && profile.status === 'active');
+  const isAdmin = Boolean(
+    (user?.app_metadata?.role === 'admin' || profile?.role === 'admin') &&
+    profile?.status !== 'suspended' &&
+    profile?.status !== 'inactive'
+  );
   const isAuthenticated = Boolean(user && profile);
 
   return (

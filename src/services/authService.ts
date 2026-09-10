@@ -151,51 +151,29 @@ export const AuthService = {
         return { success: false, user: null, profile: null, error: 'Invalid credentials.' };
       }
 
+      const isAppMetaAdmin = authData.user.app_metadata?.role === 'admin';
+      const isDefaultAdmin = ['complaint.dropzone@gmail.com', 'praveen.dialamitesolutions@gmail.com'].includes(cleanEmail);
+
       let profile: UserProfile | null = null;
 
-      if (profileService && typeof profileService.getProfile === 'function') {
-        const profRes = await profileService.getProfile(authData.user.id);
-        if (profRes.success && profRes.data) {
-          profile = profRes.data as UserProfile;
-        }
-      }
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authData.user.id)
+        .single();
 
-      if (!profile) {
-        // Fetch user profile from database to determine role
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', authData.user.id)
-          .single();
+      const userRole = (isAppMetaAdmin || isDefaultAdmin || profileData?.role === 'admin') ? 'admin' : (profileData?.role || 'customer');
 
-        if (!profileError && profileData) {
-          profile = {
-            id: profileData.id,
-            name: profileData.name,
-            email: profileData.email,
-            phone: profileData.phone,
-            role: profileData.role,
-            status: profileData.status,
-            createdAt: profileData.created_at,
-            updatedAt: profileData.updated_at,
-          };
-        } else {
-          // Create customer profile if not yet in database
-          const isDefaultAdmin = ['complaint.dropzone@gmail.com', 'praveen.dialamitesolutions@gmail.com'].includes(cleanEmail);
-          const newProfile = {
-            id: authData.user.id,
-            name: cleanEmail.split('@')[0],
-            email: cleanEmail,
-            role: isDefaultAdmin ? ('admin' as const) : ('customer' as const),
-            status: 'active' as const,
-          };
-          await supabase.from('profiles').upsert(newProfile);
-          profile = {
-            ...newProfile,
-            createdAt: new Date().toISOString(),
-          };
-        }
-      }
+      profile = {
+        id: authData.user.id,
+        name: profileData?.name || profileData?.full_name || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        phone: profileData?.phone || authData.user.user_metadata?.phone,
+        role: userRole as 'admin' | 'customer',
+        status: (profileData?.status as 'active' | 'inactive' | 'suspended') || 'active',
+        createdAt: profileData?.created_at || authData.user.created_at,
+        updatedAt: profileData?.updated_at,
+      };
 
       if (profile.status === 'suspended' || profile.status === 'inactive') {
         await supabase.auth.signOut();
@@ -229,32 +207,29 @@ export const AuthService = {
         return null;
       }
 
-      const userId = sessionData.session.user.id;
-      if (profileService && typeof profileService.getProfile === 'function') {
-        const profRes = await profileService.getProfile(userId);
-        if (profRes.success && profRes.data) {
-          return profRes.data as UserProfile;
-        }
-      }
+      const user = sessionData.session.user;
+      const userEmail = (user.email || '').toLowerCase();
+      const isAppMetaAdmin = user.app_metadata?.role === 'admin';
+      const isDefaultAdmin = ['complaint.dropzone@gmail.com', 'praveen.dialamitesolutions@gmail.com'].includes(userEmail);
 
-      const { data: profileData, error } = await supabase
+      const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('id', user.id)
         .single();
 
-      if (!error && profileData) {
-        return {
-          id: profileData.id,
-          name: profileData.name,
-          email: profileData.email,
-          phone: profileData.phone,
-          role: profileData.role,
-          status: profileData.status,
-          createdAt: profileData.created_at,
-          updatedAt: profileData.updated_at,
-        };
-      }
+      const userRole = (isAppMetaAdmin || isDefaultAdmin || profileData?.role === 'admin') ? 'admin' : (profileData?.role || 'customer');
+
+      return {
+        id: user.id,
+        name: profileData?.name || profileData?.full_name || user.user_metadata?.name || userEmail.split('@')[0],
+        email: user.email || '',
+        phone: profileData?.phone || user.user_metadata?.phone,
+        role: userRole as 'admin' | 'customer',
+        status: (profileData?.status as 'active' | 'inactive' | 'suspended') || 'active',
+        createdAt: profileData?.created_at || user.created_at,
+        updatedAt: profileData?.updated_at,
+      };
     } catch {}
     return null;
   },

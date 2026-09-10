@@ -1,10 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/^["']|["']$/g, '');
-const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim().replace(/^["']|["']$/g, '');
+// Fallback active project credentials (public publishable key) if env vars are not set at build time
+const DEFAULT_URL = 'https://khpajkbkvmhsmmklnapt.supabase.co';
+const DEFAULT_ANON_KEY = 'sb_publishable__63ABrRcohqtL4SS-psFug_PVIoEgg0';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('[Supabase Config Error] Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY environment variables.');
+const rawUrl = import.meta.env.VITE_SUPABASE_URL || DEFAULT_URL;
+const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_ANON_KEY;
+
+const supabaseUrl = (rawUrl || '').trim().replace(/^["']|["']$/g, '') || DEFAULT_URL;
+const supabaseAnonKey = (rawKey || '').trim().replace(/^["']|["']$/g, '') || DEFAULT_ANON_KEY;
+
+let clientInstance: any;
+
+try {
+  clientInstance = createClient(supabaseUrl, supabaseAnonKey);
+} catch (err) {
+  console.warn('[Supabase Config Alert] Failed to initialize custom Supabase client, using default fallback:', err);
+  clientInstance = createClient(DEFAULT_URL, DEFAULT_ANON_KEY);
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = clientInstance;

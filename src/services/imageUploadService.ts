@@ -149,7 +149,7 @@ export const ImageUploadService = {
         .list(productId);
 
       if (files && files.length > 0) {
-        const filePaths = files.map(f => `${productId}/${f.name}`);
+        const filePaths = files.map((f: any) => `${productId}/${f.name}`);
         await supabase.storage.from(BUCKET_NAME).remove(filePaths);
       }
       return true;

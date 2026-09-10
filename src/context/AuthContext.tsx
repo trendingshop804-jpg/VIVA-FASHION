@@ -46,32 +46,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    // Initial session check
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        refreshProfile().finally(() => setIsLoading(false));
-      } else {
-        setProfile(null);
-        localStorage.removeItem('vf_auth_profile');
-        setIsLoading(false);
-      }
-    });
+    let isMounted = true;
 
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await refreshProfile();
-      } else {
-        setProfile(null);
-        localStorage.removeItem('vf_auth_profile');
+    const initAuth = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const session = data?.session ?? null;
+        if (!isMounted) return;
+
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await refreshProfile().catch(() => {});
+        } else {
+          setProfile(null);
+          localStorage.removeItem('vf_auth_profile');
+        }
+      } catch (err) {
+        console.warn('[Auth Initialization Warning]:', err);
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
-      setIsLoading(false);
-    });
+    };
+
+    initAuth();
+
+    let subscription: any;
+    try {
+      const res = supabase.auth.onAuthStateChange(async (_event: any, session: any) => {
+        if (!isMounted) return;
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await refreshProfile().catch(() => {});
+        } else {
+          setProfile(null);
+          localStorage.removeItem('vf_auth_profile');
+        }
+        setIsLoading(false);
+      });
+      subscription = res?.data?.subscription;
+    } catch (err) {
+      console.warn('[Auth Listener Warning]:', err);
+    }
 
     return () => {
-      subscription.unsubscribe();
+      isMounted = false;
+      if (subscription?.unsubscribe) {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 

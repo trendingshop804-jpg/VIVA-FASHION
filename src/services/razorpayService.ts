@@ -57,38 +57,19 @@ export const RazorpayServerService = {
       console.warn('Server order creation error:', err);
     }
 
-    // Fallback: Create order directly via Razorpay API from client (requires CORS)
-    // This works if Razorpay allows client-side order creation with key_id only
-    // Note: This is less secure but works for testing
-    try {
-      const keyId = getRazorpayKeyId();
-      if (keyId.startsWith('rzp_test_')) {
-        const response = await fetch('https://api.razorpay.com/v1/orders', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            // Note: This requires Razorpay to allow client-side order creation
-            // For production, always use server-side order creation
-          },
-          body: JSON.stringify({ 
-            amount: amountInPaise, 
-            currency: 'INR', 
-            receipt: params.receipt, 
-            notes: params.notes 
-          }),
-        });
-        if (response.ok) {
-          return await response.json();
-        }
-      }
-    } catch (err) {
-      console.warn('Direct Razorpay API order creation failed:', err);
+    // In development, don't use fallback - require real order from server
+    if (import.meta.env.DEV) {
+      throw new Error(
+        'Failed to create Razorpay order. In development, the Vite dev server middleware ' +
+        'must be running to create orders via /api/create-razorpay-order. ' +
+        'Make sure you are running "npm run dev" and the dev server is active.'
+      );
     }
 
-    // Final fallback: Generate local order ID (will work for test mode with proper setup)
-    // Note: This requires the order to be pre-created on Razorpay dashboard or via API
+    // Production fallback: Generate local order ID (requires pre-created order on Razorpay)
+    // This is a last resort - production should always use server-side order creation
     const orderId = `rzp_ord_${Date.now().toString().slice(-8)}${Math.floor(100 + Math.random() * 900)}`;
-    console.warn('Using fallback local order ID:', orderId);
+    console.warn('PRODUCTION FALLBACK: Using local order ID:', orderId);
     
     return {
       id: orderId,

@@ -415,11 +415,18 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      const serverRazorpayOrder = await RazorpayServerService.createServerOrder({
-        amountInRupees: grandTotal,
-        receipt: orderNum,
-        notes: { customerName: customerInfo.name, customerEmail: customerInfo.email },
-      });
+      let serverRazorpayOrder;
+      try {
+        serverRazorpayOrder = await RazorpayServerService.createServerOrder({
+          amountInRupees: grandTotal,
+          receipt: orderNum,
+          notes: { customerName: customerInfo.name, customerEmail: customerInfo.email },
+        });
+      } catch (orderErr: any) {
+        setPaymentErrorMessage(orderErr.message || 'Failed to create Razorpay order. Please ensure dev server is running.');
+        setIsProcessingPayment(false);
+        return null;
+      }
 
       // Force test key in development to avoid live transaction issues
       const keyId = import.meta.env.DEV 

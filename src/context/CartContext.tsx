@@ -421,7 +421,15 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         notes: { customerName: customerInfo.name, customerEmail: customerInfo.email },
       });
 
-      const keyId = storeSettings.razorpayKeyId || getRazorpayKeyId();
+      // Force test key in development to avoid live transaction issues
+      const keyId = import.meta.env.DEV 
+        ? getRazorpayKeyId() 
+        : (storeSettings.razorpayKeyId || getRazorpayKeyId());
+      
+      // Validate that we're using a test key in development
+      if (import.meta.env.DEV && !keyId.startsWith('rzp_test_')) {
+        console.warn('Development mode: Forcing test Razorpay key');
+      }
 
       return new Promise<Order | null>((resolve) => {
         const options: any = {

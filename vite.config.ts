@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import crypto from 'crypto'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -8,6 +9,9 @@ export default defineConfig(({ mode }) => {
   const APP_ID = env.VITE_CASHFREE_APP_ID || ''
   const SECRET_KEY = env.VITE_CASHFREE_SECRET_KEY || ''
   const API_VERSION = '2023-08-01'
+
+  const RAZORPAY_KEY_ID = env.VITE_RAZORPAY_KEY_ID || ''
+  const RAZORPAY_KEY_SECRET = env.VITE_RAZORPAY_KEY_SECRET || ''
 
   function cashfreeApiPlugin(): Plugin {
     return {
@@ -91,6 +95,63 @@ export default defineConfig(({ mode }) => {
               res.writeHead(500, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ error: err?.message || 'Failed to fetch Cashfree order status' }))
             }
+            return
+          }
+
+          if (req.url === '/api/create-razorpay-order' && req.method === 'POST') {
+            let body = ''
+            req.on('data', (chunk) => { body += chunk })
+            req.on('end', async () => {
+              try {
+                const { amount, receipt, notes } = JSON.parse(body)
+
+                const isProd = RAZORPAY_KEY_ID.startsWith('rzp_live_')
+                const rzpBaseUrl = isProd
+                  ? 'https://api.razorpay.com/v1/orders'
+                  : 'https://api.razorpay.com/v1/orders'
+
+                const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')
+
+                const rzpResponse = await fetch(rzpBaseUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Basic ${auth}`,
+                  },
+                  body: JSON.stringify({ amount, currency: 'INR', receipt, notes }),
+                })
+
+                const data = await rzpResponse.json()
+                res.writeHead(rzpResponse.status, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify(data))
+              } catch (err: any) {
+                res.writeHead(500, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ error: err?.message || 'Failed to create Razorpay order on server' }))
+              }
+            })
+            return
+          }
+
+          if (req.url === '/api/verify-razorpay-signature' && req.method === 'POST') {
+            let body = ''
+            req.on('data', (chunk) => { body += chunk })
+            req.on('end', () => {
+              try {
+                const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = JSON.parse(body)
+
+                const generatedSignature = crypto
+                  .createHmac('sha256', RAZORPAY_KEY_SECRET)
+                  .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+                  .digest('hex')
+
+                const verified = generatedSignature === razorpaySignature
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ verified }))
+              } catch (err: any) {
+                res.writeHead(500, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ error: err?.message || 'Failed to verify Razorpay signature' }))
+              }
+            })
             return
           }
 

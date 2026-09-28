@@ -19,12 +19,12 @@ export const INITIAL_SETTINGS: StoreSettings = {
   facebook: 'https://facebook.com/vivafashionethnic',
   whatsapp: '+91 98765 43210',
 
-  // Payment settings
-  isCashfreeEnabled: true,
+  // Payment settings (Razorpay + COD enabled; Cashfree stays wired but off until real keys are added to .env)
+  isCashfreeEnabled: false,
   cashfreeAppId: '9365174848179fa9f2de2db31b715639',
   cashfreeEnvironment: 'production',
-  isRazorpayEnabled: false,
-  razorpayKeyId: 'rzp_test_51730000000000',
+  isRazorpayEnabled: true,
+  razorpayKeyId: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_51730000000000',
   isCodEnabled: true,
   codFee: 49,
   minCodOrder: 299,
@@ -976,9 +976,10 @@ export const StoreService = {
     const updated = orders.map(o => o.id === orderId ? { ...o, orderStatus: status, updatedAt: new Date().toISOString() } : o);
     localStorage.setItem('vf_orders', JSON.stringify(updated));
 
-    try {
-      await supabase.from('orders').update({ order_status: status, updated_at: new Date().toISOString() }).eq('id', orderId);
-    } catch {}
+    const { error: statusSyncError } = await supabase.from('orders').update({ order_status: status, updated_at: new Date().toISOString() }).eq('id', orderId);
+    if (statusSyncError) {
+      console.warn('Order status saved locally but Supabase sync failed:', statusSyncError.message);
+    }
 
     return true;
   },
@@ -1001,16 +1002,15 @@ export const StoreService = {
     });
     localStorage.setItem('vf_orders', JSON.stringify(updated));
 
-    try {
-      await supabase.from('orders').update({
-        payment_status: paymentStatus,
-        paid_at: extraDetails?.paidAt || (paymentStatus === 'paid' ? new Date().toISOString() : undefined),
-        paid_by: extraDetails?.paidBy,
-        razorpay_payment_id: extraDetails?.razorpayPaymentId,
-        cashfree_payment_id: extraDetails?.cashfreePaymentId,
-        updated_at: new Date().toISOString(),
-      }).eq('id', orderId);
-    } catch {}
+    const { error: paySyncError } = await supabase.from('orders').update({
+      payment_status: paymentStatus,
+      razorpay_payment_id: extraDetails?.razorpayPaymentId,
+      cashfree_payment_id: extraDetails?.cashfreePaymentId,
+      updated_at: new Date().toISOString(),
+    }).eq('id', orderId);
+    if (paySyncError) {
+      console.warn('Payment status saved locally but Supabase sync failed:', paySyncError.message);
+    }
 
     return true;
   },
@@ -1031,7 +1031,7 @@ export const StoreService = {
     }
 
     const newOrder: Order = {
-      id: `ord-${Date.now()}`,
+      id: crypto.randomUUID(),
       orderNumber: `VF-${Math.floor(10000 + Math.random() * 90000)}`,
       userId: orderData.userId,
       customerName: orderData.customerName || 'Guest Customer',
@@ -1075,35 +1075,34 @@ export const StoreService = {
     const orders = await this.fetchOrders();
     localStorage.setItem('vf_orders', JSON.stringify([newOrder, ...orders]));
 
-    try {
-      await supabase.from('orders').insert({
-        id: newOrder.id,
-        order_number: newOrder.orderNumber,
-        user_id: newOrder.userId,
-        customer_name: newOrder.customerName,
-        customer_email: newOrder.customerEmail,
-        customer_phone: newOrder.customerPhone,
-        shipping_address: newOrder.shippingAddress,
-        subtotal: newOrder.subtotal,
-        discount: newOrder.discount,
-        shipping_cost: newOrder.shippingCost,
-        cod_fee: newOrder.codFee,
-        tax: newOrder.tax,
-        total: newOrder.total,
-        currency: newOrder.currency,
-        payment_method: newOrder.paymentMethod,
-        payment_status: newOrder.paymentStatus,
-        order_status: newOrder.orderStatus,
-        items: newOrder.items,
-        cashfree_order_id: newOrder.cashfreeOrderId,
-        cashfree_payment_session_id: newOrder.cashfreePaymentSessionId,
-        cashfree_payment_id: newOrder.cashfreePaymentId,
-        razorpay_order_id: newOrder.razorpayOrderId,
-        razorpay_payment_id: newOrder.razorpayPaymentId,
-        razorpay_signature: newOrder.razorpaySignature,
-        paid_at: newOrder.paidAt,
-      });
-    } catch {}
+    const { error: insertError } = await supabase.from('orders').insert({
+      id: newOrder.id,
+      order_number: newOrder.orderNumber,
+      customer_name: newOrder.customerName,
+      customer_email: newOrder.customerEmail,
+      customer_phone: newOrder.customerPhone,
+      shipping_address: newOrder.shippingAddress,
+      subtotal: newOrder.subtotal,
+      discount: newOrder.discount,
+      shipping_cost: newOrder.shippingCost,
+      cod_fee: newOrder.codFee,
+      tax: newOrder.tax,
+      total: newOrder.total,
+      currency: newOrder.currency,
+      payment_method: newOrder.paymentMethod,
+      payment_status: newOrder.paymentStatus,
+      order_status: newOrder.orderStatus,
+      items: newOrder.items,
+      cashfree_order_id: newOrder.cashfreeOrderId,
+      cashfree_payment_session_id: newOrder.cashfreePaymentSessionId,
+      cashfree_payment_id: newOrder.cashfreePaymentId,
+      razorpay_order_id: newOrder.razorpayOrderId,
+      razorpay_payment_id: newOrder.razorpayPaymentId,
+      razorpay_signature: newOrder.razorpaySignature,
+    });
+    if (insertError) {
+      console.warn('Order saved locally but Supabase sync failed:', insertError.message);
+    }
 
     return newOrder;
   },

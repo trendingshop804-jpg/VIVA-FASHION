@@ -76,7 +76,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'warn' } | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('cashfree');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('razorpay');
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
@@ -433,9 +433,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ? getRazorpayKeyId() 
         : (storeSettings.razorpayKeyId || getRazorpayKeyId());
       
-      // Validate that we're using a test key in development
-      if (import.meta.env.DEV && !keyId.startsWith('rzp_test_')) {
-        console.warn('Development mode: Forcing test Razorpay key');
+      // Surface a clear warning when a LIVE key is used in development
+      if (import.meta.env.DEV && keyId.startsWith('rzp_live_')) {
+        console.warn('Dev mode: using LIVE Razorpay key — verify the checkout modal only; do not complete real payments while testing.');
       }
 
       return new Promise<Order | null>((resolve) => {

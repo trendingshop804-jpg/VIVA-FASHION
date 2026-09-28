@@ -45,7 +45,15 @@ export function AppContent() {
   }, [activeConfig?.seo?.metaTitle]);
 
   if (isAdminMode) {
-    return <AdminLayout />;
+    // AuthModal + Toast must also mount in admin mode so the
+    // "Administrator Sign In" gate button can open the login dialog.
+    return (
+      <>
+        <AdminLayout />
+        <AuthModal />
+        <Toast />
+      </>
+    );
   }
 
   // Dynamic Section Rendering based on sectionsOrder

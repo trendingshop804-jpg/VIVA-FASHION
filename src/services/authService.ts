@@ -91,28 +91,32 @@ export const AuthService = {
         if (profileData) {
           profile = {
             id: profileData.id,
-            name: profileData.name,
+            name: profileData.full_name || profileData.name,
             email: profileData.email,
-            phone: profileData.phone,
+            phone: profileData.phone || authData.user.user_metadata?.phone,
             role: profileData.role,
             status: profileData.status,
             createdAt: profileData.created_at,
             updatedAt: profileData.updated_at,
           };
         } else {
-          // Fallback insert if trigger hasn't fired yet
+          // Fallback insert if trigger hasn't fired yet.
+          // Column names must match the deployed schema (full_name, no phone column).
           const newProfile = {
             id: authData.user.id,
-            name: cleanName,
+            full_name: cleanName,
             email: cleanEmail,
-            phone: cleanPhone || null,
             role: 'customer' as const,
             status: 'active' as const,
           };
           await supabase.from('profiles').upsert(newProfile);
           profile = {
-            ...newProfile,
+            id: authData.user.id,
+            name: cleanName,
+            email: cleanEmail,
             phone: cleanPhone,
+            role: 'customer',
+            status: 'active',
             createdAt: new Date().toISOString(),
           };
         }

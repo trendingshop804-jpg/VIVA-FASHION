@@ -87,6 +87,8 @@ export interface SEOConfig {
 }
 
 export interface WebsiteCustomizationConfig {
+  /** Design/asset version — used to migrate stale stored configs to the current design */
+  designVersion?: number;
   general: {
     storeName: string;
     brandName: string;

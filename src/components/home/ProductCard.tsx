@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Heart, Eye, ShoppingBag } from 'lucide-react';
 import type { Product } from '../../types';
 import { StarRating } from '../common/StarRating';
@@ -9,28 +9,29 @@ interface ProductCardProps {
   product: Product;
 }
 
+const FALLBACK_IMAGE = '/assets/prod-1.png';
+
 export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const { isInWishlist, toggleWishlist, addToCart, currencySymbol } = useCart();
   const { setQuickViewProduct } = useUI();
   const wishlisted = isInWishlist(product.id);
+  const [imgError, setImgError] = useState(false);
+
+  const discount = product.originalPrice && product.originalPrice > product.price
+    ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
+    : 0;
 
   return (
-    <div className="group relative flex flex-col bg-[#FAF7F2] rounded-xl overflow-hidden transition-all duration-300 hover:shadow-lg border border-[#DEC3B5]/40">
+    <div className="group relative flex flex-col bg-white rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg border border-[#EAE3D9]/60">
       {/* Product Image Area */}
-      <div className="relative aspect-[3/4] w-full bg-[#F5EBE6] overflow-hidden">
+      <div className="relative aspect-[218/204] w-full bg-[#F5E6D3]/30 overflow-hidden">
         <img
-          src={product.image}
+          src={imgError ? FALLBACK_IMAGE : product.image}
           alt={product.name}
           className="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
           loading="lazy"
+          onError={() => setImgError(true)}
         />
-
-        {/* Tag badge (if any) */}
-        {product.tag && (
-          <span className="absolute top-2.5 left-2.5 bg-[#FAF7F2]/90 backdrop-blur-sm text-[#191E28] text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm border border-[#DEC3B5]/50 shadow-sm">
-            {product.tag}
-          </span>
-        )}
 
         {/* Top-Right Wishlist Button */}
         <button
@@ -39,14 +40,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             e.stopPropagation();
             toggleWishlist(product);
           }}
-          className={`absolute top-2.5 right-2.5 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm ${
+          className={`absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm ${
             wishlisted
-              ? 'bg-[#C27D6E] text-white scale-110'
-              : 'bg-[#FAF7F2]/90 hover:bg-white text-[#191E28] hover:scale-110'
+              ? 'bg-[#C2185B] text-white'
+              : 'bg-white/90 hover:bg-white text-[#1A1A2E] hover:text-[#C2185B]'
           }`}
           aria-label={wishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
         >
-          <Heart size={14} className={wishlisted ? 'fill-white' : ''} />
+          <Heart size={13} className={wishlisted ? 'fill-white' : ''} />
         </button>
 
         {/* Hover Action Bar */}
@@ -57,7 +58,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
               e.stopPropagation();
               setQuickViewProduct(product);
             }}
-            className="flex-1 bg-[#191E28]/90 hover:bg-[#191E28] text-white text-[10px] font-semibold tracking-wider uppercase py-2 px-2 rounded backdrop-blur-sm flex items-center justify-center gap-1 transition-colors"
+            className="flex-1 bg-[#1A1A2E]/90 hover:bg-[#1A1A2E] text-white text-[10px] font-semibold tracking-wider uppercase py-2 px-2 rounded backdrop-blur-sm flex items-center justify-center gap-1 transition-colors"
           >
             <Eye size={12} />
             <span>Quick View</span>
@@ -69,7 +70,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
               e.stopPropagation();
               addToCart(product);
             }}
-            className="bg-[#C27D6E] hover:bg-[#A66355] text-white p-2 rounded shadow transition-colors"
+            className="bg-[#C2185B] hover:bg-[#A01348] text-white p-2 rounded shadow transition-colors"
             aria-label="Add to bag"
           >
             <ShoppingBag size={14} />
@@ -78,50 +79,49 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       </div>
 
       {/* Product Details */}
-      <div className="p-3 sm:p-3.5 flex flex-col flex-1 justify-between space-y-1.5">
-        {/* Rating & Category */}
-        <div className="flex items-center justify-between">
-          <StarRating rating={product.rating} showCount={false} />
-          <span className="text-[10px] uppercase tracking-wider text-[#A66355] font-bold">
-            {product.category}
-          </span>
-        </div>
-
+      <div className="p-3 flex flex-col flex-1">
         {/* Product Title */}
         <h4
           onClick={() => setQuickViewProduct(product)}
-          className="text-xs sm:text-[13px] font-medium text-[#191E28] line-clamp-2 hover:text-[#C27D6E] cursor-pointer transition-colors leading-snug"
+          className="text-xs sm:text-[13px] font-medium text-[#1A1A2E] line-clamp-1 hover:text-[#C2185B] cursor-pointer transition-colors"
           title={product.name}
         >
           {product.name}
         </h4>
 
-        {/* Price & Colors */}
-        <div className="flex items-center justify-between pt-1">
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-xs sm:text-sm font-bold text-[#191E28]">
-              {currencySymbol}{product.price.toLocaleString()}
+        {/* Price Row */}
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-sm font-bold text-[#1A1A2E]">
+            {currencySymbol}{product.price.toLocaleString()}
+          </span>
+          {product.originalPrice && product.originalPrice > product.price && (
+            <span className="text-[11px] text-[#8C93A0] line-through">
+              {currencySymbol}{product.originalPrice.toLocaleString()}
             </span>
-            {product.originalPrice && product.originalPrice > product.price && (
-              <span className="text-[11px] text-[#8C93A0] line-through">
-                {currencySymbol}{product.originalPrice.toLocaleString()}
-              </span>
-            )}
-          </div>
-
-          {/* Color Dots */}
-          <div className="flex items-center gap-1">
-            {product.colors.slice(0, 3).map((c, idx) => (
-              <span
-                key={idx}
-                className="w-2 h-2 rounded-full border border-black/10"
-                style={{ backgroundColor: c.hex }}
-                title={c.name}
-              />
-            ))}
-          </div>
+          )}
+          {discount > 0 && (
+            <span className="text-[10px] font-semibold text-[#C2185B]">
+              {discount}% OFF
+            </span>
+          )}
         </div>
 
+        {/* Rating */}
+        <div className="mt-1.5">
+          <StarRating rating={product.rating} showCount={true} />
+        </div>
+
+        {/* Add to Cart Button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            addToCart(product);
+          }}
+          className="mt-3 w-full bg-[#C2185B] hover:bg-[#A01348] text-white py-2.5 rounded-md text-xs font-semibold tracking-wide transition-colors flex items-center justify-center gap-2"
+        >
+          <ShoppingBag size={14} />
+          Add to Cart
+        </button>
       </div>
     </div>
   );

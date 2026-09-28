@@ -1,99 +1,125 @@
-import React from 'react';
-import { Menu, Search, User, Heart, ShoppingBag } from 'lucide-react';
+import React, { useState } from 'react';
+import { Search, Heart, ShoppingBag, ChevronDown } from 'lucide-react';
 import { Logo } from '../common/Logo';
-import { DesktopNav } from './DesktopNav';
 import { useCart } from '../../context/CartContext';
 import { useUI } from '../../context/UIContext';
-import { useAuth } from '../../context/AuthContext';
+import { useCMS } from '../../context/CMSContext';
 
 export const Header: React.FC = () => {
   const { totalCartItems, wishlist } = useCart();
-  const { setIsCartOpen, setIsWishlistOpen, setIsMobileMenuOpen, setIsSearchOpen } = useUI();
-  const { setIsAuthModalOpen, isAuthenticated, profile } = useAuth();
+  const { setIsCartOpen, setIsWishlistOpen, setIsSearchOpen } = useUI();
+  const { activeConfig } = useCMS();
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const navItems = activeConfig?.header?.navigationItems?.filter(i => i.isActive) || [
+    { id: 'nav-1', label: 'Home', url: '#hero', isActive: true, order: 1 },
+    { id: 'nav-2', label: 'Women', url: '#featured-categories', isActive: true, order: 2, hasDropdown: true },
+    { id: 'nav-3', label: 'New Arrivals', url: '#featured-products', isActive: true, order: 3 },
+    { id: 'nav-4', label: 'Sale', url: '#featured-products', isActive: true, order: 4 },
+    { id: 'nav-5', label: 'About Us', url: '#about', isActive: true, order: 5 },
+    { id: 'nav-6', label: 'Contact', url: '#footer', isActive: true, order: 6 },
+  ];
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      setIsSearchOpen(true);
+    }
+  };
 
   return (
-    <header className="w-full bg-[#FAF7F2] border-b border-[#EAE3D9]/60">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        {/* Main Bar */}
-        <div className="flex items-center justify-between py-3 md:py-4">
-          {/* Left: Menu & Search */}
-          <div className="flex items-center gap-3 md:gap-5 w-1/3">
-            <button
-              onClick={() => setIsMobileMenuOpen(true)}
-              className="p-1.5 text-[#191E28] hover:text-[#C27D6E] transition-colors focus:outline-none"
-              aria-label="Toggle Navigation Menu"
-            >
-              <Menu size={20} />
-            </button>
-            
-            <button
-              onClick={() => setIsSearchOpen(true)}
-              className="hidden sm:flex items-center gap-1.5 text-[11px] font-medium tracking-[0.16em] uppercase text-[#191E28] hover:text-[#C27D6E] transition-colors"
-              aria-label="Open Search"
-            >
-              <Search size={15} />
-              <span className="font-semibold">SEARCH</span>
-            </button>
-          </div>
-
-          {/* Center: Brand Circular Logo */}
-          <div className="flex justify-center w-1/3">
+    <header className="w-full bg-white border-b border-[#EAE3D9]/60 sticky top-0 z-40">
+      <div className="w-full px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between py-3 md:py-4 gap-4">
+          {/* Left: Logo */}
+          <div className="flex-shrink-0">
             <Logo size="md" />
           </div>
 
-          {/* Right: Icons (Search on mobile, User, Wishlist, Bag) */}
-          <div className="flex items-center justify-end gap-3 md:gap-4 w-1/3">
+          {/* Center: Navigation */}
+          <nav className="hidden lg:flex items-center gap-6">
+            {navItems.map((item) => {
+              const isActive = item.url === '#hero';
+              return (
+                <a
+                  key={item.id || item.label}
+                  href={item.url || '#'}
+                  className={`relative flex items-center gap-0.5 text-[13px] font-medium transition-colors group py-1 ${
+                    isActive ? 'text-[#C2185B]' : 'text-[#1A1A2E] hover:text-[#C2185B]'
+                  }`}
+                >
+                  {item.label}
+                  {(item as any).hasDropdown && (
+                    <ChevronDown size={12} className="group-hover:rotate-180 transition-transform" />
+                  )}
+                  <span
+                    className={`absolute bottom-0 left-0 h-[2px] bg-[#C2185B] transition-all duration-300 ${
+                      isActive ? 'w-full' : 'w-0 group-hover:w-full'
+                    }`}
+                  />
+                </a>
+              );
+            })}
+          </nav>
+
+          {/* Right: Search + Icons */}
+          <div className="flex items-center gap-3 md:gap-4">
+            {/* Search Bar */}
+            <form onSubmit={handleSearch} className="hidden md:flex items-center">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search for kurtis, dresses, leggings..."
+                  className="w-56 lg:w-64 bg-white border border-[#E3DDD8] rounded-full px-4 py-2 pr-10 text-xs text-[#1A1A2E] placeholder-[#8C7B6B] focus:outline-none focus:border-[#C2185B] transition-all"
+                />
+                <button
+                  type="submit"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8C7B6B] hover:text-[#C2185B] transition-colors"
+                >
+                  <Search size={15} />
+                </button>
+              </div>
+            </form>
+
+            {/* Mobile Search */}
             <button
               onClick={() => setIsSearchOpen(true)}
-              className="sm:hidden p-1.5 text-[#191E28] hover:text-[#C27D6E] transition-colors"
+              className="md:hidden p-2 text-[#1A1A2E] hover:text-[#C2185B] transition-colors"
               aria-label="Search"
             >
-              <Search size={19} />
+              <Search size={20} />
             </button>
 
-            <button
-              onClick={() => setIsAuthModalOpen(true)}
-              className={`p-1.5 transition-colors relative ${isAuthenticated ? 'text-[#C27D6E]' : 'text-[#191E28] hover:text-[#C27D6E]'}`}
-              aria-label="My Account"
-              title={isAuthenticated ? `Signed in as ${profile?.name || 'Customer'}` : "Sign In or Register"}
-            >
-              <User size={19} />
-              {isAuthenticated && (
-                <span className="absolute top-1 right-1 w-2 h-2 bg-emerald-500 rounded-full" />
-              )}
-            </button>
-
+            {/* Wishlist */}
             <button
               onClick={() => setIsWishlistOpen(true)}
-              className="relative p-1.5 text-[#191E28] hover:text-[#C27D6E] transition-colors"
+              className="relative p-2 text-[#1A1A2E] hover:text-[#C2185B] transition-colors"
               aria-label={`Wishlist (${wishlist.length} items)`}
             >
-              <Heart size={19} className={wishlist.length > 0 ? "fill-[#C27D6E] text-[#C27D6E]" : ""} />
+              <Heart size={20} className={wishlist.length > 0 ? 'fill-[#C2185B] text-[#C2185B]' : ''} />
               {wishlist.length > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#C27D6E] text-[#FFFDFB] text-[9px] font-bold rounded-full flex items-center justify-center">
+                <span className="absolute top-0.5 right-0.5 w-4 h-4 bg-[#C2185B] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
                   {wishlist.length}
                 </span>
               )}
             </button>
 
+            {/* Cart */}
             <button
               onClick={() => setIsCartOpen(true)}
-              className="relative p-1.5 text-[#191E28] hover:text-[#C27D6E] transition-colors"
+              className="relative p-2 text-[#1A1A2E] hover:text-[#C2185B] transition-colors"
               aria-label={`Shopping Bag (${totalCartItems} items)`}
             >
-              <ShoppingBag size={19} />
+              <ShoppingBag size={20} />
               {totalCartItems > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#191E28] text-[#FFFDFB] text-[9px] font-bold rounded-full flex items-center justify-center">
+                <span className="absolute top-0.5 right-0.5 w-4 h-4 bg-[#C2185B] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
                   {totalCartItems}
                 </span>
               )}
             </button>
           </div>
-        </div>
-
-        {/* Desktop Navigation Links Row */}
-        <div className="hidden md:block">
-          <DesktopNav />
         </div>
       </div>
     </header>

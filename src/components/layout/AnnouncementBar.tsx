@@ -1,37 +1,61 @@
 import React from 'react';
-import { Sparkles } from 'lucide-react';
+import { Truck, Heart, Sparkles, User, ShoppingBag } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import { useCMS } from '../../context/CMSContext';
+import { useUI } from '../../context/UIContext';
+import { useAuth } from '../../context/AuthContext';
 
 export const AnnouncementBar: React.FC = () => {
-  const { currencySymbol, freeShippingThreshold } = useCart();
+  const { currencySymbol, freeShippingThreshold, totalCartItems } = useCart();
   const { activeConfig } = useCMS();
+  const { setIsCartOpen } = useUI();
+  const { setIsAuthModalOpen, isAuthenticated, profile } = useAuth();
   const general = activeConfig?.general;
 
   if (general && general.isAnnouncementVisible === false) {
     return null;
   }
 
-  const bgColor = general?.announcementBgColor || '#B87B6F';
-  const customMessage = general?.announcementText;
-
   return (
-    <div
-      style={{ backgroundColor: bgColor }}
-      className="text-[#FDFBF7] py-1.5 px-3 sm:px-4 text-[10px] md:text-[11px] font-semibold tracking-[0.16em] uppercase transition-colors select-none flex items-center justify-between"
-    >
-      <div className="hidden sm:flex items-center gap-1 opacity-80 text-[9px] w-1/4">
-        <Sparkles size={11} />
-        <span>Authentic Ethnic Handcrafted</span>
+    <div className="bg-[#3A1F2E] text-white py-2 px-4 text-[11px] md:text-xs flex items-center justify-between">
+      {/* Left: Free Shipping */}
+      <div className="flex items-center gap-1.5">
+        <Truck size={13} />
+        <span className="hidden sm:inline">Free Shipping on Orders Above {currencySymbol}{freeShippingThreshold}</span>
+        <span className="sm:hidden">Free Shipping</span>
       </div>
 
-      <div className="flex-1 text-center font-bold tracking-[0.18em] px-2 truncate">
-        <span>
-          {customMessage || `FREE SHIPPING ON ORDERS OVER ${currencySymbol}${freeShippingThreshold} | CODE: VIVAETHNIC15`}
-        </span>
+      {/* Center: Quality Badges */}
+      <div className="hidden md:flex items-center gap-4 text-[10px] tracking-wider">
+        <span className="flex items-center gap-1"><Sparkles size={11} /> Elegant Styles</span>
+        <span className="text-white/40">|</span>
+        <span className="flex items-center gap-1"><Heart size={11} /> Premium Quality</span>
+        <span className="text-white/40">|</span>
+        <span className="flex items-center gap-1"><Sparkles size={11} /> Made for You</span>
       </div>
 
-      <div className="hidden sm:block w-1/4" />
+      {/* Right: Login & Cart */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setIsAuthModalOpen(true)}
+          className="flex items-center gap-1 hover:text-[#F8C8DC] transition-colors"
+        >
+          <User size={13} />
+          <span>{isAuthenticated ? (profile?.name || 'My Account') : 'Login / Register'}</span>
+        </button>
+        <button
+          onClick={() => setIsCartOpen(true)}
+          className="relative flex items-center gap-1 hover:text-[#F8C8DC] transition-colors"
+        >
+          <ShoppingBag size={13} />
+          <span className="hidden sm:inline">Cart</span>
+          {totalCartItems > 0 && (
+            <span className="absolute -top-1.5 -right-2 w-4 h-4 bg-[#C2185B] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+              {totalCartItems}
+            </span>
+          )}
+        </button>
+      </div>
     </div>
   );
 };

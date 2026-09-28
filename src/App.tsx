@@ -10,6 +10,7 @@ import { OurStory } from './components/home/OurStory';
 import { AdditionalCustomerLove } from './components/home/AdditionalCustomerLove';
 import { AboutSection } from './components/home/AboutSection';
 import { Footer } from './components/layout/Footer';
+import { FeatureBar } from './components/layout/FeatureBar';
 import { MobileBottomNav } from './components/layout/MobileBottomNav';
 import { MobileDrawer } from './components/layout/MobileDrawer';
 import { CartDrawer } from './components/modals/CartDrawer';
@@ -77,17 +78,17 @@ export function AppContent() {
   const sectionsOrder = activeConfig?.sectionsOrder || [
     { id: 'hero', name: 'Hero Banner', isVisible: true, order: 1 },
     { id: 'categories', name: 'Featured Categories', isVisible: true, order: 2 },
-    { id: 'promotions', name: 'Promotional Banners', isVisible: true, order: 3 },
-    { id: 'bestsellers', name: 'Best Sellers', isVisible: true, order: 4 },
-    { id: 'customerloves', name: 'Customer Loves', isVisible: true, order: 5 },
-    { id: 'ourstory', name: 'Our Story', isVisible: true, order: 6 },
-    { id: 'about', name: 'About Us', isVisible: true, order: 7 },
+    { id: 'bestsellers', name: 'Best Sellers', isVisible: true, order: 3 },
+    { id: 'promotions', name: 'Promotional Banners', isVisible: true, order: 4 },
+    { id: 'customerloves', name: 'Customer Loves', isVisible: false, order: 5 },
+    { id: 'ourstory', name: 'Our Story', isVisible: false, order: 6 },
+    { id: 'about', name: 'About Us', isVisible: false, order: 7 },
   ];
 
   return (
-    <div className="min-h-screen bg-[#EAD8D0] py-0 sm:py-6 lg:py-10 px-0 sm:px-4 md:px-6 lg:px-8 flex justify-center">
-      {/* Centered Website Container with soft rounded corners & luxury shadow */}
-      <div className="w-full max-w-[1360px] bg-[#FAF7F2] sm:rounded-2xl lg:rounded-3xl shadow-2xl overflow-hidden border sm:border-[#DEC3B5]/60 flex flex-col relative">
+    <div className="min-h-screen bg-white">
+      {/* Full-width container - no outer padding or rounded corners */}
+      <div className="w-full flex flex-col relative">
         
         {/* 1. Announcement Bar */}
         <AnnouncementBar />
@@ -101,6 +102,9 @@ export function AppContent() {
             .filter((sec) => sec.isVisible !== false)
             .map((sec) => renderSectionById(sec.id))}
         </main>
+
+        {/* 10. Feature Bar */}
+        <FeatureBar />
 
         {/* 11. Dark Footer */}
         <Footer />

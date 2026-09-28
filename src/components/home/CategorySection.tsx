@@ -1,80 +1,91 @@
-import React from 'react';
-import { CATEGORIES_DATA } from '../../data/mockData';
+import React, { useState } from 'react';
+import { ArrowRight } from 'lucide-react';
 import { useUI } from '../../context/UIContext';
 import { useCMS } from '../../context/CMSContext';
 import type { ProductCategory } from '../../types';
 
+interface CategoryItem {
+  id: string;
+  slug: ProductCategory | string;
+  title: string;
+  image: string;
+}
+
+// Design assets extracted from the approved reference design (public/assets)
+const DEFAULT_CATEGORIES: CategoryItem[] = [
+  { id: 'cat-1', slug: 'kurtis', title: 'Kurtis', image: '/assets/cat-kurtis.png' },
+  { id: 'cat-2', slug: 'salwar-suits', title: 'Salwar Suits', image: '/assets/cat-salwar.png' },
+  { id: 'cat-3', slug: 'leggings', title: 'Leggings', image: '/assets/cat-leggings.png' },
+  { id: 'cat-4', slug: 'shawls', title: 'Shawls & Dupattas', image: '/assets/cat-shawls.png' },
+  { id: 'cat-5', slug: 'dresses', title: 'Dresses', image: '/assets/cat-dresses.png' },
+  { id: 'cat-6', slug: 'co-ord-sets', title: 'Co-ord Sets', image: '/assets/cat-coord.png' },
+];
+
 export const CategorySection: React.FC = () => {
   const { setSelectedCategory } = useUI();
   const { activeConfig } = useCMS();
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
   const customCategories = activeConfig?.categories?.filter(c => c.isActive) || [];
-  const displayCategories = customCategories.length > 0
+  const displayCategories: CategoryItem[] = customCategories.length > 0
     ? customCategories.map(c => ({
         id: c.id,
         slug: c.slug as ProductCategory,
         title: c.title,
-        buttonText: c.buttonText,
         image: c.imageUrl,
       }))
-    : CATEGORIES_DATA;
+    : DEFAULT_CATEGORIES;
 
-  const handleCategoryClick = (slug: ProductCategory) => {
-    setSelectedCategory(slug);
+  const handleCategoryClick = (slug: string) => {
+    setSelectedCategory(slug as ProductCategory);
     const target = document.getElementById('featured-products');
     if (target) {
       target.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
-  return (
-    <section id="featured-categories" className="w-full bg-[#FAF7F2] py-8 md:py-12 border-b border-[#EAE3D9]/60">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        
-        {/* Section Heading */}
-        <div className="text-center mb-6 md:mb-8">
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight uppercase text-[#191E28] font-serif">
-            FEATURED CATEGORIES
-          </h2>
-          <div className="w-12 h-0.5 bg-[#C27D6E] mx-auto mt-2" />
-        </div>
+  const resolveImage = (cat: CategoryItem, index: number) => {
+    if (failedImages[cat.id]) {
+      return DEFAULT_CATEGORIES[index % DEFAULT_CATEGORIES.length].image;
+    }
+    return cat.image || DEFAULT_CATEGORIES[index % DEFAULT_CATEGORIES.length].image;
+  };
 
-        {/* Categories: Kurtis, Shawls, Leggings */}
-        <div className="flex sm:grid sm:grid-cols-3 gap-4 md:gap-6 overflow-x-auto sm:overflow-x-visible no-scrollbar pb-2 sm:pb-0 snap-x snap-mandatory">
-          {displayCategories.map((cat) => (
+  return (
+    <section id="featured-categories" className="w-full bg-white py-10 md:py-14">
+      <div className="w-full px-4 sm:px-6 lg:px-8">
+        
+        {/* Category Circles */}
+        <div className="flex flex-wrap justify-center gap-6 md:gap-8 lg:gap-10">
+          {displayCategories.map((cat, index) => (
             <div
               key={cat.id}
               onClick={() => handleCategoryClick(cat.slug)}
-              className="min-w-[260px] sm:min-w-0 flex-1 snap-center group relative aspect-[3/4] sm:aspect-[4/5] rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer bg-[#F5EBE6] border border-[#DEC3B5]/50"
+              className="group flex flex-col items-center cursor-pointer"
             >
-              {/* Category Image */}
-              <img
-                src={cat.image}
-                alt={cat.title}
-                className="w-full h-full object-cover object-center transition-transform duration-700 group-hover:scale-105"
-                loading="lazy"
-              />
-
-              {/* Dark Gradient Overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-[#191E28]/80 via-[#191E28]/20 to-transparent transition-opacity" />
-
-              {/* Content Overlay */}
-              <div className="absolute inset-x-0 bottom-0 p-5 flex flex-col items-center justify-end text-center z-10">
-                <h3 className="text-base sm:text-lg md:text-xl font-bold uppercase tracking-[0.14em] text-[#FFFFFF] mb-3 drop-shadow-sm font-sans">
-                  {cat.title}
-                </h3>
-                
-                <button
-                  type="button"
-                  className="bg-[#191E28]/90 group-hover:bg-[#C27D6E] text-[#FAF7F2] text-xs font-semibold tracking-wider uppercase px-5 py-2 rounded-md transition-all duration-200 shadow-md backdrop-blur-sm group-hover:scale-105"
-                >
-                  {cat.buttonText}
-                </button>
+              {/* Circular Image */}
+              <div className="w-28 h-28 sm:w-32 sm:h-32 md:w-36 md:h-36 lg:w-40 lg:h-40 rounded-full overflow-hidden border-4 border-transparent group-hover:border-[#C2185B] transition-all duration-300 group-hover:shadow-lg">
+                <img
+                  src={resolveImage(cat, index)}
+                  alt={cat.title}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                  loading="lazy"
+                  onError={() => setFailedImages(prev => ({ ...prev, [cat.id]: true }))}
+                />
               </div>
+
+              {/* Category Name */}
+              <h3 className="mt-3 text-sm md:text-base font-semibold text-[#1A1A2E] group-hover:text-[#C2185B] transition-colors">
+                {cat.title}
+              </h3>
+
+              {/* Shop Now Link */}
+              <span className="mt-1 flex items-center gap-1 text-[11px] md:text-xs text-[#C2185B] font-medium group-hover:gap-2 transition-all">
+                Shop Now <ArrowRight size={12} />
+              </span>
             </div>
           ))}
         </div>
-
       </div>
     </section>
   );

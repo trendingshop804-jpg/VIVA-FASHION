@@ -5,6 +5,20 @@ import { DEFAULT_WEBSITE_CONFIG } from '../data/defaultCMSConfig';
 const DRAFT_KEY = 'vf_cms_draft_config';
 const PUBLISHED_KEY = 'vf_cms_published_config';
 
+/** Bump when the storefront design changes so stale stored configs migrate to fresh defaults */
+const DESIGN_VERSION = 3;
+
+function freshDefault(): WebsiteCustomizationConfig {
+  return { ...DEFAULT_WEBSITE_CONFIG, designVersion: DESIGN_VERSION };
+}
+
+/** Returns the config only when it was saved with the current design version */
+function migrateDesign(config: unknown): WebsiteCustomizationConfig | null {
+  const cfg = config as WebsiteCustomizationConfig | null;
+  if (cfg && typeof cfg === 'object' && cfg.designVersion === DESIGN_VERSION) return cfg;
+  return null;
+}
+
 export const CMSService = {
   /**
    * Fetch live published configuration for storefront.
@@ -19,20 +33,28 @@ export const CMSService = {
         .single();
 
       if (!error && data && data.config) {
-        const merged = this.mergeWithDefault(data.config);
-        localStorage.setItem(PUBLISHED_KEY, JSON.stringify(merged));
-        return merged;
+        const migrated = migrateDesign(data.config);
+        if (migrated) {
+          const merged = this.mergeWithDefault(migrated);
+          localStorage.setItem(PUBLISHED_KEY, JSON.stringify(merged));
+          return merged;
+        }
+        // Stored config belongs to an older design — serve the fresh one
+        const fresh = freshDefault();
+        localStorage.setItem(PUBLISHED_KEY, JSON.stringify(fresh));
+        return fresh;
       }
     } catch {}
 
     const saved = localStorage.getItem(PUBLISHED_KEY);
     if (saved) {
       try {
-        return this.mergeWithDefault(JSON.parse(saved));
+        const migrated = migrateDesign(JSON.parse(saved));
+        if (migrated) return this.mergeWithDefault(migrated);
       } catch {}
     }
 
-    return DEFAULT_WEBSITE_CONFIG;
+    return freshDefault();
   },
 
   /**
@@ -47,16 +69,24 @@ export const CMSService = {
         .single();
 
       if (!error && data && data.config) {
-        const merged = this.mergeWithDefault(data.config);
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(merged));
-        return merged;
+        const migrated = migrateDesign(data.config);
+        if (migrated) {
+          const merged = this.mergeWithDefault(migrated);
+          localStorage.setItem(DRAFT_KEY, JSON.stringify(merged));
+          return merged;
+        }
+        // Stored draft belongs to an older design — start fresh from the new defaults
+        const fresh = freshDefault();
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(fresh));
+        return fresh;
       }
     } catch {}
 
     const saved = localStorage.getItem(DRAFT_KEY);
     if (saved) {
       try {
-        return this.mergeWithDefault(JSON.parse(saved));
+        const migrated = migrateDesign(JSON.parse(saved));
+        if (migrated) return this.mergeWithDefault(migrated);
       } catch {}
     }
 
@@ -130,9 +160,10 @@ export const CMSService = {
    * Ensure missing or undefined fields gracefully fall back to DEFAULT_WEBSITE_CONFIG
    */
   mergeWithDefault(inputConfig: Partial<WebsiteCustomizationConfig> | null | undefined): WebsiteCustomizationConfig {
-    if (!inputConfig) return DEFAULT_WEBSITE_CONFIG;
+    if (!inputConfig) return freshDefault();
 
     return {
+      designVersion: inputConfig.designVersion ?? DESIGN_VERSION,
       general: { ...DEFAULT_WEBSITE_CONFIG.general, ...inputConfig.general },
       header: {
         logoSize: inputConfig.header?.logoSize || DEFAULT_WEBSITE_CONFIG.header.logoSize,

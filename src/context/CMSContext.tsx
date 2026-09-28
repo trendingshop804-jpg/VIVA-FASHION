@@ -65,7 +65,7 @@ export const CMSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ) => {
     setDraftConfig(prev => {
       const updatedSection = typeof data === 'object' && !Array.isArray(data)
-        ? { ...prev[section], ...data }
+        ? { ...(prev[section] as Record<string, unknown>), ...data }
         : data;
 
       const updated = {

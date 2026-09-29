@@ -796,6 +796,140 @@ function mapDbProductToProduct(row: any): Product {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Orders — Supabase is the SOURCE OF TRUTH.
+// localStorage only ever holds a cache of rows that came from Supabase (plus
+// this device's own guest orders in vf_my_orders). Every Supabase failure is
+// logged in full and surfaced to the caller — never silently replaced with
+// local data.
+// ---------------------------------------------------------------------------
+const ORDERS_CACHE_KEY = 'vf_orders';
+const MY_ORDERS_CACHE_KEY = 'vf_my_orders';
+
+function readLocalOrders(key: string): Order[] {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as Order[]) : [];
+  } catch (err) {
+    console.error('[Orders] Local cache could not be read:', err);
+    return [];
+  }
+}
+
+function writeLocalOrders(key: string, orders: Order[]): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(orders));
+  } catch (err) {
+    console.error('[Orders] Local cache could not be written:', err);
+  }
+}
+
+/** Patch an order in both local caches (best effort — caches only). */
+function patchLocalOrder(orderId: string, patch: Partial<Order>): void {
+  for (const key of [ORDERS_CACHE_KEY, MY_ORDERS_CACHE_KEY]) {
+    const list = readLocalOrders(key);
+    const idx = list.findIndex(o => o.id === orderId);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...patch };
+      writeLocalOrders(key, list);
+    }
+  }
+}
+
+/** Cache a freshly created order on this device (general + "my orders"). */
+function prependLocalOrder(order: Order): void {
+  for (const key of [ORDERS_CACHE_KEY, MY_ORDERS_CACHE_KEY]) {
+    const list = readLocalOrders(key).filter(o => o.id !== order.id);
+    writeLocalOrders(key, [order, ...list]);
+  }
+}
+
+/** Map an orders table row → frontend Order (canonical field mapping, used by fetch, realtime payloads and caches alike). */
+export function mapOrderRow(row: any): Order {
+  return {
+    id: row.id,
+    orderNumber: row.order_number,
+    userId: row.user_id,
+    customerName: row.customer_name,
+    customerEmail: row.customer_email,
+    customerPhone: row.customer_phone,
+    shippingAddress: row.shipping_address || {},
+    subtotal: Number(row.subtotal),
+    discount: Number(row.discount || 0),
+    shippingCost: Number(row.shipping_cost || 0),
+    codFee: Number(row.cod_fee || 0),
+    tax: Number(row.tax || 0),
+    total: Number(row.total),
+    currency: row.currency || 'INR',
+    paymentMethod: row.payment_method || 'cod',
+    paymentStatus: row.payment_status || 'pending',
+    orderStatus: row.order_status || 'Confirmed',
+    items: Array.isArray(row.items) ? row.items : [],
+    cashfreeOrderId: row.cashfree_order_id,
+    cashfreePaymentSessionId: row.cashfree_payment_session_id,
+    cashfreePaymentId: row.cashfree_payment_id,
+    razorpayOrderId: row.razorpay_order_id,
+    razorpayPaymentId: row.razorpay_payment_id,
+    razorpaySignature: row.razorpay_signature,
+    paidAt: row.paid_at,
+    paidBy: row.paid_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+interface OrdersColumnSupport {
+  /** orders.user_id exists (migration SECTION 6) */
+  userId: boolean;
+  /** orders.paid_at + orders.paid_by exist (migration SECTION 6) */
+  paidAudit: boolean;
+}
+
+let ordersColumnSupport: OrdersColumnSupport | null = null;
+
+function isMissingColumnError(error: { code?: string; message?: string }): boolean {
+  return error.code === '42703' || /does not exist/i.test(error.message || '');
+}
+
+/**
+ * Detect once per session whether the optional audit columns exist, so the
+ * checkout keeps working before SECTION 6 of the migration is applied and
+ * starts writing them automatically afterwards. Only a confirmed
+ * "column does not exist" error marks a column missing; other errors stay
+ * optimistic (a broken connection will fail the write anyway).
+ */
+async function getOrdersColumnSupport(): Promise<OrdersColumnSupport> {
+  if (ordersColumnSupport) return ordersColumnSupport;
+
+  const probe = async (columns: string): Promise<{ present: boolean; problem?: string }> => {
+    const { error } = await supabase.from('orders').select(columns).limit(1);
+    if (!error) return { present: true };
+    if (isMissingColumnError(error)) return { present: false };
+    return { present: true, problem: error.message };
+  };
+
+  const userIdProbe = await probe('id,user_id');
+  const paidProbe = await probe('id,paid_at,paid_by');
+
+  ordersColumnSupport = { userId: userIdProbe.present, paidAudit: paidProbe.present };
+
+  if (!ordersColumnSupport.userId || !ordersColumnSupport.paidAudit) {
+    const missing = [
+      !ordersColumnSupport.userId ? 'user_id' : null,
+      !ordersColumnSupport.paidAudit ? 'paid_at/paid_by' : null,
+    ].filter(Boolean).join(', ');
+    console.error(
+      `[Orders] Supabase orders table is missing column(s): ${missing}. ` +
+      'Run SECTION 6 of supabase-migration.sql in the Supabase SQL editor. ' +
+      'Orders still save — just without those audit fields.'
+    );
+  }
+  if (userIdProbe.problem) console.warn('[Orders] Could not verify orders.user_id:', userIdProbe.problem);
+  if (paidProbe.problem) console.warn('[Orders] Could not verify orders.paid_at/paid_by:', paidProbe.problem);
+
+  return ordersColumnSupport;
+}
+
 export const StoreService = {
   // Products
   async fetchProducts(): Promise<Product[]> {
@@ -806,7 +940,9 @@ export const StoreService = {
         localStorage.setItem('vf_products', JSON.stringify(mapped));
         return mapped;
       }
-    } catch {}
+    } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
 
     const saved = localStorage.getItem('vf_products');
     if (saved) {
@@ -815,7 +951,9 @@ export const StoreService = {
         const enforced = enforceCategoryImages(parsed);
         localStorage.setItem('vf_products', JSON.stringify(enforced));
         return enforced;
-      } catch {}
+      } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
     }
     
     localStorage.setItem('vf_products', JSON.stringify(INITIAL_PRODUCTS));
@@ -928,114 +1066,318 @@ export const StoreService = {
   },
 
   // Orders
+  /**
+   * Global/admin order list. Supabase is the only source: on success the rows
+   * are cached locally (optional cache only), on failure the complete error is
+   * logged and THROWN — the admin panel must never display stale local rows
+   * as if they were real database orders.
+   */
   async fetchOrders(): Promise<Order[]> {
-    try {
-      const { data, error } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
-        const mapped: Order[] = data.map((row: any) => ({
-          id: row.id,
-          orderNumber: row.order_number,
-          userId: row.user_id,
-          customerName: row.customer_name,
-          customerEmail: row.customer_email,
-          customerPhone: row.customer_phone,
-          shippingAddress: row.shipping_address || {},
-          subtotal: Number(row.subtotal),
-          discount: Number(row.discount || 0),
-          shippingCost: Number(row.shipping_cost || 0),
-          codFee: Number(row.cod_fee || 0),
-          tax: Number(row.tax || 0),
-          total: Number(row.total),
-          currency: row.currency || 'INR',
-          paymentMethod: row.payment_method || 'cod',
-          paymentStatus: row.payment_status || 'pending',
-          orderStatus: row.order_status || 'Confirmed',
-          items: Array.isArray(row.items) ? row.items : [],
-          cashfreeOrderId: row.cashfree_order_id,
-          cashfreePaymentSessionId: row.cashfree_payment_session_id,
-          cashfreePaymentId: row.cashfree_payment_id,
-          razorpayOrderId: row.razorpay_order_id,
-          razorpayPaymentId: row.razorpay_payment_id,
-          razorpaySignature: row.razorpay_signature,
-          paidAt: row.paid_at,
-          paidBy: row.paid_by,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        }));
-        localStorage.setItem('vf_orders', JSON.stringify(mapped));
-        return mapped;
-      }
-    } catch {}
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-    const saved = localStorage.getItem('vf_orders');
-    return saved ? JSON.parse(saved) : INITIAL_ORDERS;
+    if (error) {
+      console.error('[Admin Orders] Failed to load orders from Supabase:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
+      throw new Error(`Could not load orders from the database: ${error.message}`);
+    }
+
+    const mapped: Order[] = (data ?? []).map(mapOrderRow);
+    // Only refresh the cache when we actually got rows back: a successful
+    // empty read (e.g. a guest session with no visible rows) must not wipe
+    // orders cached earlier on this device.
+    if (mapped.length > 0) writeLocalOrders(ORDERS_CACHE_KEY, mapped);
+    return mapped;
   },
 
+  /** The authenticated Supabase auth user id, or null for guest checkout. Never invented. */
+  async getCurrentUserId(): Promise<string | null> {
+    try {
+      const { data } = await supabase.auth.getSession();
+      return data?.session?.user?.id ?? null;
+    } catch (err) {
+      console.error('[Orders] Could not read the authenticated session:', (err as Error).message);
+      return null;
+    }
+  },
+
+  /**
+   * Customer "My Orders".
+   * - Signed in: fetch only the caller's own rows from Supabase (linked
+   *   user_id, or the email their profile/order uses).
+   * - Guest: there is deliberately no anon SELECT policy on orders, so guests
+   *   see the orders they placed on this device from the local cache.
+   */
+  async fetchMyOrders(): Promise<Order[]> {
+    const userId = await this.getCurrentUserId();
+
+    if (userId) {
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('id', userId)
+        .maybeSingle();
+      if (profileError) {
+        console.error('[My Orders] Failed to load the profile email:', {
+          message: profileError.message,
+          code: profileError.code,
+        });
+      }
+      const email = ((profile as any)?.email || '').trim();
+
+      const support = await getOrdersColumnSupport();
+      const filters: string[] = [];
+      if (support.userId) filters.push(`user_id.eq.${userId}`);
+      // PostgREST .or() splits on commas — strip them defensively.
+      if (email) filters.push(`customer_email.eq.${email.replace(/[(),]/g, '')}`);
+
+      let query = supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (filters.length > 0) query = query.or(filters.join(','));
+
+      const { data, error } = await query;
+      if (error) {
+        console.error('[My Orders] Failed to load orders from Supabase:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        });
+        throw new Error(`Could not load your orders: ${error.message}`);
+      }
+
+      const mapped: Order[] = (data ?? []).map(mapOrderRow);
+      // Same cache rule as fetchOrders: never wipe on an empty read.
+      if (mapped.length > 0) writeLocalOrders(MY_ORDERS_CACHE_KEY, mapped);
+      return mapped;
+    }
+
+    // Guest path: seed the split cache once from the legacy shared cache so
+    // orders placed before this change remain visible on this device.
+    try {
+      if (localStorage.getItem(MY_ORDERS_CACHE_KEY) === null) {
+        const legacy = readLocalOrders(ORDERS_CACHE_KEY);
+        if (legacy.length > 0) writeLocalOrders(MY_ORDERS_CACHE_KEY, legacy);
+      }
+    } catch (err) {
+      console.warn('[My Orders] Legacy local cache could not be migrated:', err);
+    }
+    return readLocalOrders(MY_ORDERS_CACHE_KEY);
+  },
+
+  /**
+   * Persist an order status change. Returns true ONLY when Supabase actually
+   * confirmed the write; otherwise throws with the real error.
+   *
+   * - Legacy local-only ids ("ord-2") never existed server-side → local cache.
+   * - Guest sessions cannot UPDATE rows (RLS has no anon UPDATE policy, by
+   *   design) → clear error instead of a fake local-only success.
+   * - Admin sessions → direct UPDATE, verified with RETURNING.
+   * - Signed-in customers → SECURITY DEFINER RPC (migration SECTION 5) that
+   *   validates ownership/transitions; falls back to a verified direct UPDATE
+   *   while the function is not deployed yet.
+   */
   async updateOrderStatus(orderId: string, status: OrderStatus): Promise<boolean> {
-    const orders = await this.fetchOrders();
-    const updated = orders.map(o => o.id === orderId ? { ...o, orderStatus: status, updatedAt: new Date().toISOString() } : o);
-    localStorage.setItem('vf_orders', JSON.stringify(updated));
+    const nowIso = new Date().toISOString();
 
     // Legacy localStorage-only orders use ids like "ord-2" that aren't UUIDs and
     // don't exist server-side; syncing them sends an invalid id filter (HTTP 400).
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
-      // Prefer the customer-safe RPC (migration SECTION 5): signed-in customers
-      // may only cancel/return their OWN orders through allowed transitions.
-      // It fails for admins/guests (and while the function doesn't exist yet),
-      // so on any RPC error we fall back to a direct UPDATE — admin sessions
-      // sync fine; guests stay local-only because RLS blocks anon updates.
-      const { error: rpcError } = await supabase.rpc('customer_order_status_change', {
-        p_order_id: orderId,
-        p_new_status: status,
-      });
-      if (rpcError) {
-        const { error: statusSyncError } = await supabase.from('orders').update({ order_status: status, updated_at: new Date().toISOString() }).eq('id', orderId);
-        if (statusSyncError) {
-          console.warn('Order status saved locally but Supabase sync failed:', statusSyncError.message);
-        }
-      }
+    if (!isUuid(orderId)) {
+      patchLocalOrder(orderId, { orderStatus: status, updatedAt: nowIso });
+      console.warn(
+        `[Orders] "${orderId}" is a local-only legacy order — the status change was kept in the local cache (this order is not in Supabase).`
+      );
+      return true;
     }
 
+    const userId = await this.getCurrentUserId();
+    if (!userId) {
+      // Anonymous browsers have no UPDATE policy on orders (otherwise anyone
+      // could cancel anyone's order), so a local-only "success" would silently
+      // diverge from the database. Refuse honestly instead.
+      throw new Error('Please sign in with the account you ordered with to cancel or return this order.');
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+    if (profileError) {
+      console.warn('[Orders] Could not read caller role, assuming customer path:', profileError.message);
+    }
+    const isAdmin = (profile as any)?.role === 'admin';
+
+    if (isAdmin) {
+      const { data: updated, error } = await supabase
+        .from('orders')
+        .update({ order_status: status, updated_at: nowIso })
+        .eq('id', orderId)
+        .select('id');
+      if (error) {
+        console.error('[Orders] Supabase UPDATE failed', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+          orderId,
+          status,
+        });
+        throw new Error(`Could not update the order status: ${error.message}`);
+      }
+      if (!updated || updated.length === 0) {
+        throw new Error('The order status was not updated: order not found or blocked by row-level security.');
+      }
+      patchLocalOrder(orderId, { orderStatus: status, updatedAt: nowIso });
+      return true;
+    }
+
+    // Customer path: RPC validates ownership + allowed transitions.
+    const { error: rpcError } = await supabase.rpc('customer_order_status_change', {
+      p_order_id: orderId,
+      p_new_status: status,
+    });
+    if (!rpcError) {
+      patchLocalOrder(orderId, { orderStatus: status, updatedAt: nowIso });
+      return true;
+    }
+    if (rpcError.code !== 'PGRST202') {
+      // Function exists but rejected the change (not your order / bad transition).
+      console.error('[Orders] customer_order_status_change rejected', {
+        message: rpcError.message,
+        details: rpcError.details,
+        code: rpcError.code,
+        orderId,
+        status,
+      });
+      throw new Error(rpcError.message || 'The order could not be updated.');
+    }
+
+    // PGRST202 = the RPC is not deployed yet → try a direct UPDATE and make
+    // sure a row was actually changed before claiming success.
+    console.error(
+      "[Orders] The customer_order_status_change RPC is missing — run SECTION 5 of supabase-migration.sql. Falling back to a direct UPDATE."
+    );
+    const { data: updated, error } = await supabase
+      .from('orders')
+      .update({ order_status: status, updated_at: nowIso })
+      .eq('id', orderId)
+      .select('id');
+    if (error) {
+      console.error('[Orders] Supabase UPDATE failed', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        orderId,
+        status,
+      });
+      throw new Error(`Could not update the order status: ${error.message}`);
+    }
+    if (!updated || updated.length === 0) {
+      throw new Error(
+        'The order status was not updated: no database permission. Run SECTION 5 of supabase-migration.sql (customer cancel/return).'
+      );
+    }
+    patchLocalOrder(orderId, { orderStatus: status, updatedAt: nowIso });
     return true;
   },
 
-  async updatePaymentStatus(orderId: string, paymentStatus: PaymentStatus, extraDetails?: { paidAt?: string; paidBy?: string; razorpayPaymentId?: string; cashfreePaymentId?: string }): Promise<boolean> {
-    const orders = await this.fetchOrders();
-    const updated = orders.map(o => {
-      if (o.id === orderId) {
-        return {
-          ...o,
-          paymentStatus,
-          paidAt: extraDetails?.paidAt || (paymentStatus === 'paid' ? new Date().toISOString() : o.paidAt),
-          paidBy: extraDetails?.paidBy || o.paidBy,
-          razorpayPaymentId: extraDetails?.razorpayPaymentId || o.razorpayPaymentId,
-          cashfreePaymentId: extraDetails?.cashfreePaymentId || o.cashfreePaymentId,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      return o;
-    });
-    localStorage.setItem('vf_orders', JSON.stringify(updated));
+  /**
+   * Persist a payment status change (payment_status, paid_at, paid_by,
+   * gateway payment ids, updated_at) to Supabase. Returns true ONLY after the
+   * database confirmed the write; rejects with the real error otherwise.
+   */
+  async updatePaymentStatus(
+    orderId: string,
+    paymentStatus: PaymentStatus,
+    extraDetails?: { paidAt?: string; paidBy?: string; razorpayPaymentId?: string; cashfreePaymentId?: string }
+  ): Promise<boolean> {
+    const nowIso = new Date().toISOString();
 
     // Same non-UUID guard as updateOrderStatus: legacy local orders stay local-only.
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
-      const { error: paySyncError } = await supabase.from('orders').update({
-        payment_status: paymentStatus,
-        razorpay_payment_id: extraDetails?.razorpayPaymentId,
-        cashfree_payment_id: extraDetails?.cashfreePaymentId,
-        updated_at: new Date().toISOString(),
-      }).eq('id', orderId);
-      if (paySyncError) {
-        console.warn('Payment status saved locally but Supabase sync failed:', paySyncError.message);
-      }
+    if (!isUuid(orderId)) {
+      const localPatch: Partial<Order> = { paymentStatus, updatedAt: nowIso };
+      if (paymentStatus === 'paid' || extraDetails?.paidAt) localPatch.paidAt = extraDetails?.paidAt || nowIso;
+      if (extraDetails?.paidBy) localPatch.paidBy = extraDetails.paidBy;
+      if (extraDetails?.razorpayPaymentId) localPatch.razorpayPaymentId = extraDetails.razorpayPaymentId;
+      if (extraDetails?.cashfreePaymentId) localPatch.cashfreePaymentId = extraDetails.cashfreePaymentId;
+      patchLocalOrder(orderId, localPatch);
+      console.warn(
+        `[Orders] "${orderId}" is a local-only legacy order — the payment change was kept in the local cache (this order is not in Supabase).`
+      );
+      return true;
     }
+
+    const support = await getOrdersColumnSupport();
+
+    const row: Record<string, unknown> = {
+      payment_status: paymentStatus,
+      updated_at: nowIso,
+    };
+    if (extraDetails?.razorpayPaymentId) row.razorpay_payment_id = extraDetails.razorpayPaymentId;
+    if (extraDetails?.cashfreePaymentId) row.cashfree_payment_id = extraDetails.cashfreePaymentId;
+
+    if (support.paidAudit) {
+      if (paymentStatus === 'paid') row.paid_at = extraDetails?.paidAt || nowIso;
+      else if (extraDetails?.paidAt) row.paid_at = extraDetails.paidAt;
+      if (extraDetails?.paidBy) row.paid_by = extraDetails.paidBy;
+    } else if (paymentStatus === 'paid') {
+      console.error(
+        '[Orders] orders.paid_at/paid_by columns are missing — run SECTION 6 of supabase-migration.sql. The payment status was saved without the audit fields.'
+      );
+    }
+
+    const { data: updated, error } = await supabase
+      .from('orders')
+      .update(row)
+      .eq('id', orderId)
+      .select('id');
+
+    if (error) {
+      console.error('[Orders] Supabase payment UPDATE failed', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        orderId,
+        paymentStatus,
+      });
+      throw new Error(`Could not update the payment status: ${error.message}`);
+    }
+    if (!updated || updated.length === 0) {
+      throw new Error('The payment status was not updated: order not found or blocked by row-level security.');
+    }
+
+    const localPatch: Partial<Order> = { paymentStatus, updatedAt: nowIso };
+    if (typeof row.paid_at === 'string') localPatch.paidAt = row.paid_at;
+    if (typeof row.paid_by === 'string') localPatch.paidBy = row.paid_by;
+    if (extraDetails?.razorpayPaymentId) localPatch.razorpayPaymentId = extraDetails.razorpayPaymentId;
+    if (extraDetails?.cashfreePaymentId) localPatch.cashfreePaymentId = extraDetails.cashfreePaymentId;
+    patchLocalOrder(orderId, localPatch);
 
     return true;
   },
 
+  /**
+   * Create an order with Supabase as the source of truth.
+   *
+   * Sequence: validate → resolve the real auth user id → duplicate-check the
+   * gateway transaction → INSERT into Supabase → only after the database
+   * confirms the row, update local caches/stock and return the order.
+   * If the INSERT fails the complete Supabase error is logged and THROWN —
+   * the caller must never show "order placed successfully" in that case.
+   */
   async createOrder(orderData: Partial<Order>): Promise<Order> {
     const settings = this.getSettings();
-    const isCod = orderData.paymentMethod === 'cod';
 
     // Strict validation: Reject disabled payment methods
     if (orderData.paymentMethod === 'cashfree' && !settings.isCashfreeEnabled) {
@@ -1048,10 +1390,17 @@ export const StoreService = {
       throw new Error('Cash on Delivery (COD) is currently disabled by store administrator.');
     }
 
+    const nowIso = new Date().toISOString();
+
+    // Ownership: prefer the explicitly passed user id, otherwise the live
+    // authenticated Supabase session. Guests get null (never an invented id).
+    const sessionUserId = await this.getCurrentUserId();
+    const userId = orderData.userId ?? sessionUserId ?? undefined;
+
     const newOrder: Order = {
       id: crypto.randomUUID(),
-      orderNumber: `VF-${Math.floor(10000 + Math.random() * 90000)}`,
-      userId: orderData.userId,
+      orderNumber: orderData.orderNumber || `VF-${Math.floor(10000 + Math.random() * 90000)}`,
+      userId,
       customerName: orderData.customerName || 'Guest Customer',
       customerEmail: orderData.customerEmail || 'guest@example.com',
       customerPhone: orderData.customerPhone,
@@ -1064,7 +1413,7 @@ export const StoreService = {
       total: orderData.total || 0,
       currency: 'INR',
       paymentMethod: orderData.paymentMethod || 'cashfree',
-      paymentStatus: orderData.paymentStatus || (isCod ? 'pending' : 'pending'),
+      paymentStatus: orderData.paymentStatus || 'pending',
       orderStatus: orderData.orderStatus || 'Confirmed',
       items: orderData.items || [],
       cashfreeOrderId: orderData.cashfreeOrderId,
@@ -1073,27 +1422,51 @@ export const StoreService = {
       razorpayOrderId: orderData.razorpayOrderId,
       razorpayPaymentId: orderData.razorpayPaymentId,
       razorpaySignature: orderData.razorpaySignature,
-      paidAt: orderData.paymentStatus === 'paid' ? new Date().toISOString() : undefined,
-      createdAt: new Date().toISOString(),
+      paidAt: orderData.paymentStatus === 'paid' ? nowIso : undefined,
+      createdAt: nowIso,
     };
 
-    // Deduct stock server-side/state-side for confirmed orders
-    if (newOrder.items && newOrder.items.length > 0) {
-      const allProds = await this.fetchProducts();
-      const updatedProds = allProds.map(p => {
-        const item = newOrder.items.find(i => i.productId === p.id || i.name === p.name);
-        if (item) {
-          return { ...p, stock: Math.max(0, p.stock - item.quantity) };
-        }
-        return p;
-      });
-      localStorage.setItem('vf_products', JSON.stringify(updatedProds));
+    // ---- Idempotency (A payment callback can fire more than once) ----------
+    const gatewayFilters: string[] = [];
+    if (orderData.razorpayPaymentId) gatewayFilters.push(`razorpay_payment_id.eq.${orderData.razorpayPaymentId}`);
+    if (orderData.cashfreePaymentId) gatewayFilters.push(`cashfree_payment_id.eq.${orderData.cashfreePaymentId}`);
+    if (orderData.razorpayOrderId) gatewayFilters.push(`razorpay_order_id.eq.${orderData.razorpayOrderId}`);
+    if (orderData.cashfreeOrderId) gatewayFilters.push(`cashfree_order_id.eq.${orderData.cashfreeOrderId}`);
+
+    const findExistingByGateway = async (): Promise<Order | null> => {
+      if (gatewayFilters.length === 0) return null;
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .or(gatewayFilters.join(','))
+        .limit(1);
+      if (error) {
+        // Note: guests have no anon SELECT policy, so this legitimately
+        // returns [] for them — only real errors are logged.
+        console.error('[Orders] Duplicate-check query failed', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        });
+        return null;
+      }
+      return data && data.length > 0 ? mapOrderRow(data[0]) : null;
+    };
+
+    if (gatewayFilters.length > 0) {
+      const existing = await findExistingByGateway();
+      if (existing) {
+        console.warn(
+          `[Orders] Duplicate payment callback ignored — ${existing.orderNumber} already exists for this gateway transaction.`
+        );
+        return existing;
+      }
     }
 
-    const orders = await this.fetchOrders();
-    localStorage.setItem('vf_orders', JSON.stringify([newOrder, ...orders]));
-
-    const { error: insertError } = await supabase.from('orders').insert({
+    // ---- Build the database row (canonical snake_case field names) ---------
+    const support = await getOrdersColumnSupport();
+    const row: Record<string, unknown> = {
       id: newOrder.id,
       order_number: newOrder.orderNumber,
       customer_name: newOrder.customerName,
@@ -1117,33 +1490,200 @@ export const StoreService = {
       razorpay_order_id: newOrder.razorpayOrderId,
       razorpay_payment_id: newOrder.razorpayPaymentId,
       razorpay_signature: newOrder.razorpaySignature,
-    });
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+    if (support.userId) row.user_id = userId ?? null;
+    if (support.paidAudit) {
+      if (newOrder.paymentStatus === 'paid') {
+        row.paid_at = (orderData as any).paidAt || nowIso;
+        row.paid_by = (orderData as any).paidBy || 'gateway';
+      } else if (newOrder.paidAt) {
+        row.paid_at = newOrder.paidAt;
+      }
+    }
+
+    // ---- INSERT FIRST: the customer only sees success after this ----------
+    const { error: insertError } = await supabase.from('orders').insert(row);
+
     if (insertError) {
-      console.warn('Order saved locally but Supabase sync failed:', insertError.message);
+      // 23505 = unique violation: the same gateway transaction was already
+      // saved (a racing/re-fired callback) — never create a second order.
+      if (insertError.code === '23505') {
+        const existing = await findExistingByGateway();
+        if (existing) {
+          console.warn(
+            `[Orders] Duplicate insert blocked by the database — returning existing ${existing.orderNumber}.`
+          );
+          prependLocalOrder(existing);
+          return existing;
+        }
+        console.error('[Orders] Supabase INSERT failed (duplicate transaction)', {
+          message: insertError.message,
+          details: insertError.details,
+          hint: insertError.hint,
+          code: insertError.code,
+          orderNumber: newOrder.orderNumber,
+        });
+        throw new Error(
+          'This payment transaction has already been recorded for an order. Do not pay again — check My Orders or contact support with your payment reference.'
+        );
+      }
+
+      // Log the COMPLETE Supabase error, then fail loudly: no fake local order.
+      console.error('[Orders] Supabase INSERT failed', {
+        message: insertError.message,
+        details: insertError.details,
+        hint: insertError.hint,
+        code: insertError.code,
+        orderNumber: newOrder.orderNumber,
+        paymentMethod: newOrder.paymentMethod,
+      });
+      throw new Error(
+        `Order ${newOrder.orderNumber} could not be saved to the database: ${insertError.message}`
+      );
+    }
+
+    // ---- Confirmed insert: update local caches + stock only now ------------
+    prependLocalOrder(newOrder);
+
+    // Best-effort: upsert a customer record so the admin customer directory
+    // shows every person who has ever placed an order. A failure here never
+    // blocks the order (the order itself is already confirmed above).
+    try {
+      await supabase.from('customers').upsert({
+        name: newOrder.customerName,
+        email: newOrder.customerEmail,
+        phone: newOrder.customerPhone || null,
+        address: newOrder.shippingAddress,
+      }, { onConflict: 'email' });
+    } catch (custErr) {
+      console.warn('[Orders] Customer record upsert failed (non-blocking):', (custErr as Error).message);
+    }
+
+    // Deduct stock cache for confirmed orders
+    if (newOrder.items && newOrder.items.length > 0) {
+      try {
+        const allProds = await this.fetchProducts();
+        const updatedProds = allProds.map(p => {
+          const item = newOrder.items.find(i => i.productId === p.id || i.name === p.name);
+          if (item) {
+            return { ...p, stock: Math.max(0, p.stock - item.quantity) };
+          }
+          return p;
+        });
+        localStorage.setItem('vf_products', JSON.stringify(updatedProds));
+      } catch (err) {
+        console.error('[Orders] Product stock cache update failed:', err);
+      }
     }
 
     return newOrder;
   },
 
-  // Customers
+  // Customers — derived from profiles + orders data
+  /**
+   * Build the admin customer directory from `profiles` (real registered users)
+   * combined with order aggregation. The old `customers` table had different
+   * columns (no city/state/total_orders/total_spent/status), so the fetch
+   * always fell through to seed data. This approach uses the source of truth.
+   */
   async fetchCustomers(): Promise<Customer[]> {
     try {
-      const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
-        return data.map((c: any) => ({
-          id: c.id,
-          name: c.name,
-          email: c.email,
-          phone: c.phone,
-          city: c.city,
-          state: c.state,
-          totalOrders: c.total_orders,
-          totalSpent: Number(c.total_spent),
-          status: c.status,
-          createdAt: c.created_at,
-        }));
+      // 1. Fetch all customer profiles
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (profilesError) {
+        console.error('[Customers] Failed to load profiles:', profilesError.message);
       }
-    } catch {}
+
+      // 2. Fetch all orders for aggregation
+      const { data: allOrders, error: ordersError } = await supabase
+        .from('orders')
+        .select('customer_email, customer_name, customer_phone, shipping_address, total, created_at');
+
+      if (ordersError) {
+        console.error('[Customers] Failed to load orders for aggregation:', ordersError.message);
+      }
+
+      // 3. Build order stats by email
+      const orderStats: Record<string, { count: number; spent: number; city?: string; state?: string }> = {};
+      if (allOrders) {
+        for (const o of allOrders) {
+          const email = (o.customer_email || '').toLowerCase().trim();
+          if (!email) continue;
+          if (!orderStats[email]) {
+            orderStats[email] = { count: 0, spent: 0 };
+          }
+          orderStats[email].count += 1;
+          orderStats[email].spent += Number(o.total || 0);
+          // Extract city/state from shipping address if available
+          const addr = o.shipping_address as any;
+          if (addr?.city && !orderStats[email].city) {
+            orderStats[email].city = addr.city;
+            orderStats[email].state = addr.state;
+          }
+        }
+      }
+
+      // 4. Build customer list from profiles
+      const customerMap = new Map<string, Customer>();
+
+      if (profiles && profiles.length > 0) {
+        for (const p of profiles) {
+          // Skip admin profiles from customer directory
+          if (p.role === 'admin') continue;
+          const email = (p.email || '').toLowerCase().trim();
+          const stats = orderStats[email] || { count: 0, spent: 0 };
+          const customer: Customer = {
+            id: p.id,
+            name: p.name || p.full_name || email.split('@')[0] || 'Customer',
+            email: email,
+            phone: p.phone,
+            city: stats.city,
+            state: stats.state,
+            totalOrders: stats.count,
+            totalSpent: stats.spent,
+            status: stats.spent >= 5000 ? 'VIP' : (stats.count > 0 ? 'Active' : 'Active'),
+            createdAt: p.created_at || new Date().toISOString(),
+          };
+          customerMap.set(email, customer);
+        }
+      }
+
+      // 5. Also include customers from orders who may not have a profile
+      if (allOrders) {
+        for (const o of allOrders) {
+          const email = (o.customer_email || '').toLowerCase().trim();
+          if (!email || customerMap.has(email)) continue;
+          const stats = orderStats[email] || { count: 0, spent: 0 };
+          const customer: Customer = {
+            id: `order-customer-${email}`,
+            name: o.customer_name || email.split('@')[0],
+            email: email,
+            phone: o.customer_phone,
+            city: stats.city,
+            state: stats.state,
+            totalOrders: stats.count,
+            totalSpent: stats.spent,
+            status: stats.spent >= 5000 ? 'VIP' : 'Active',
+            createdAt: o.created_at || new Date().toISOString(),
+          };
+          customerMap.set(email, customer);
+        }
+      }
+
+      const result = Array.from(customerMap.values());
+      if (result.length > 0) {
+        localStorage.setItem('vf_customers', JSON.stringify(result));
+        return result;
+      }
+    } catch (err) {
+      console.error('[Customers] Failed to build customer directory:', err);
+    }
 
     const saved = localStorage.getItem('vf_customers');
     return saved ? JSON.parse(saved) : INITIAL_CUSTOMERS;
@@ -1168,7 +1708,9 @@ export const StoreService = {
           isActive: Boolean(c.is_active),
         }));
       }
-    } catch {}
+    } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
 
     const saved = localStorage.getItem('vf_coupons');
     return saved ? JSON.parse(saved) : INITIAL_COUPONS;
@@ -1210,7 +1752,9 @@ export const StoreService = {
         times_used: newCoupon.timesUsed,
         is_active: newCoupon.isActive,
       }, { onConflict: 'code' });
-    } catch {}
+    } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
 
     return newCoupon;
   },
@@ -1221,7 +1765,9 @@ export const StoreService = {
     localStorage.setItem('vf_coupons', JSON.stringify(updated));
     try {
       await supabase.from('coupons').delete().eq('id', couponId);
-    } catch {}
+    } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
     return true;
   },
 
@@ -1241,7 +1787,9 @@ export const StoreService = {
           date: r.created_at ? r.created_at.split('T')[0] : '2026-02-18',
         }));
       }
-    } catch {}
+    } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
 
     const saved = localStorage.getItem('vf_reviews');
     return saved ? JSON.parse(saved) : INITIAL_REVIEWS;
@@ -1253,7 +1801,9 @@ export const StoreService = {
     localStorage.setItem('vf_reviews', JSON.stringify(updated));
     try {
       await supabase.from('reviews').update({ status }).eq('id', reviewId);
-    } catch {}
+    } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
     return true;
   },
 
@@ -1293,7 +1843,9 @@ export const StoreService = {
         localStorage.setItem('vf_settings', JSON.stringify(synced));
         return ps;
       }
-    } catch {}
+    } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
 
     const curr = this.getSettings();
     return {
@@ -1340,7 +1892,9 @@ export const StoreService = {
         razorpay_key_id: updatedSettings.razorpayKeyId,
         updated_at: new Date().toISOString(),
       });
-    } catch {}
+    } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
 
     return {
       id: 'default',
@@ -1378,7 +1932,9 @@ export const StoreService = {
         razorpay_key_id: settings.razorpayKeyId,
         updated_at: new Date().toISOString(),
       }).then();
-    } catch {}
+    } catch (err) {
+      console.error('[StoreService] Supabase read failed, falling back to local cache:', err);
+    }
     return settings;
   }
 };

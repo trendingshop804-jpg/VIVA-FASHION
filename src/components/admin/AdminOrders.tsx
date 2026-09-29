@@ -15,7 +15,7 @@ import { StoreService } from '../../services/storeService';
 import type { Order, OrderStatus, PaymentStatus } from '../../types';
 
 export const AdminOrders: React.FC = () => {
-  const { orders, refreshOrders, adminUser } = useAdmin();
+  const { orders, refreshOrders, ordersLoading, ordersError, adminUser } = useAdmin();
   const { currencySymbol, showToast } = useCart();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,13 +24,11 @@ export const AdminOrders: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // Keep the orders list live: refetch whenever this view opens and keep
-  // polling while it stays visible, so newly placed customer orders show up
-  // without requiring a manual page reload.
+  // Refetch when the view opens. Ongoing updates (new customer orders,
+  // status changes from other devices) arrive through the AdminContext
+  // realtime subscription + its single 15s fallback poll — no second timer here.
   useEffect(() => {
     refreshOrders();
-    const timer = window.setInterval(() => refreshOrders(), 20000);
-    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -66,8 +64,9 @@ export const AdminOrders: React.FC = () => {
       if (selectedOrder && selectedOrder.id === orderId) {
         setSelectedOrder(prev => prev ? { ...prev, orderStatus: newStatus } : null);
       }
-    } catch {
-      showToast('Failed to update status', 'warn');
+    } catch (err) {
+      console.error('[Admin Orders] Status update failed:', err);
+      showToast((err as Error)?.message || 'Failed to update status', 'warn');
     } finally {
       setUpdatingId(null);
     }
@@ -86,8 +85,9 @@ export const AdminOrders: React.FC = () => {
       if (selectedOrder && selectedOrder.id === orderId) {
         setSelectedOrder(prev => prev ? { ...prev, paymentStatus: 'paid', paidAt: new Date().toISOString(), paidBy: adminName } : null);
       }
-    } catch {
-      showToast('Failed to mark payment received', 'warn');
+    } catch (err) {
+      console.error('[Admin Orders] Payment status update failed:', err);
+      showToast((err as Error)?.message || 'Failed to mark payment received', 'warn');
     } finally {
       setUpdatingId(null);
     }
@@ -142,6 +142,26 @@ export const AdminOrders: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* Database status: never show local rows as real orders — surface Supabase failures instead */}
+      {ordersError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <span>
+            <strong>Database error:</strong> {ordersError}
+          </span>
+          <button
+            onClick={() => refreshOrders()}
+            className="font-bold underline shrink-0 self-start sm:self-auto"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {!ordersError && ordersLoading && orders.length === 0 && (
+        <div className="bg-[#FAF7F2] border border-[#DEC3B5]/60 text-[#555E6C] text-xs p-3 rounded-xl text-center">
+          Loading orders from Supabase…
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div className="bg-white p-4 rounded-xl border border-[#DEC3B5]/60 flex flex-col sm:flex-row gap-3 items-center justify-between">

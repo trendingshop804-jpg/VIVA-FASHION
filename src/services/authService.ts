@@ -122,6 +122,19 @@ export const AuthService = {
         }
       }
 
+      // Ensure a customers-table record exists too (used by legacy admin views
+      // and the customer directory). Best-effort — never blocks signup.
+      try {
+        await supabase.from('customers').upsert({
+          id: authData.user.id,
+          name: cleanName,
+          email: cleanEmail,
+          phone: cleanPhone || null,
+        }, { onConflict: 'email' });
+      } catch (custErr) {
+        console.warn('[Signup] customers table upsert failed (non-blocking):', (custErr as Error).message);
+      }
+
       return { success: true, user: authData.user, profile, error: undefined };
     } catch (err: any) {
       return { success: false, user: null, profile: null, error: formatAuthError(err) };

@@ -110,78 +110,12 @@ export const productService = {
 };
 
 // ============ ORDERS ============
-export const orderService = {
-  // Create order
-  async create(orderData: {
-    user_id: string;
-    items: any[];
-    total: number;
-    shipping_address: string;
-  }) {
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .insert([{ ...orderData, status: 'pending', created_at: new Date() }])
-        .select();
-      
-      if (error) throw error;
-      return { success: true, data: data?.[0] };
-    } catch (error: any) {
-      console.error('Error creating order:', error.message);
-      return { success: false, error: error.message };
-    }
-  },
-
-  // Get user's orders
-  async getUserOrders(userId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      return { success: true, data };
-    } catch (error: any) {
-      console.error('Error fetching orders:', error.message);
-      return { success: false, error: error.message };
-    }
-  },
-
-  // Update order status
-  async updateStatus(orderId: string, status: 'pending' | 'shipped' | 'delivered' | 'cancelled') {
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .update({ status, updated_at: new Date() })
-        .eq('id', orderId)
-        .select();
-      
-      if (error) throw error;
-      return { success: true, data: data?.[0] };
-    } catch (error: any) {
-      console.error('Error updating order:', error.message);
-      return { success: false, error: error.message };
-    }
-  },
-
-  // Get all orders (admin)
-  async getAll() {
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      return { success: true, data };
-    } catch (error: any) {
-      console.error('Error fetching all orders:', error.message);
-      return { success: false, error: error.message };
-    }
-  },
-};
+// REMOVED: the legacy `orderService` (orderService.create/getUserOrders/
+// updateStatus/getAll) was never imported anywhere and used a competing
+// schema (`status` instead of `order_status`). All order reads and writes go
+// through src/services/storeService.ts, which treats the Supabase orders
+// table as the source of truth (see StoreService.fetchOrders/createOrder/
+// updateOrderStatus/updatePaymentStatus).
 
 // ============ USER PROFILES ============
 export const profileService = {

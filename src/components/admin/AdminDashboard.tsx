@@ -22,7 +22,7 @@ import { VisitorAnalyticsService } from '../../services/visitorAnalytics';
 import type { VisitorStats, VisitorActivity } from '../../types';
 
 export const AdminDashboard: React.FC = () => {
-  const { products, orders, customers, setActiveAdminTab, refreshOrders } = useAdmin();
+  const { products, orders, customers, setActiveAdminTab, refreshOrders, ordersError } = useAdmin();
   const { currencySymbol } = useCart();
 
   const [visitorStats, setVisitorStats] = useState<VisitorStats>(VisitorAnalyticsService.getStats());
@@ -107,6 +107,21 @@ export const AdminDashboard: React.FC = () => {
           <span>Add New Product</span>
         </button>
       </div>
+
+      {/* Surface Supabase order-loading failures instead of showing stale/empty data silently */}
+      {ordersError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <span>
+            <strong>Database error while loading orders:</strong> {ordersError}
+          </span>
+          <button
+            onClick={() => refreshOrders()}
+            className="font-bold underline shrink-0 self-start sm:self-auto"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* 4 Main KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

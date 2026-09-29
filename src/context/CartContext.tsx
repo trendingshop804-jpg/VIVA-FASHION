@@ -5,6 +5,7 @@ import { loadRazorpayScript, getRazorpayKeyId, RazorpayServerService } from '../
 import { CashfreeService, PaymentAuditService } from '../services/cashfreeService';
 import { VisitorAnalyticsService } from '../services/visitorAnalytics';
 import { CMSContext } from './CMSContext';
+import { AuthContext } from './AuthContext';
 
 interface CustomerAddressInfo {
   name: string;
@@ -60,6 +61,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // even if the provider isn't mounted — falls back to defaults below.
   const cms = useContext(CMSContext);
   const activeConfig = cms?.activeConfig;
+  // Currently authenticated customer (defensive read, never throws). The id
+  // is passed to StoreService.createOrder so orders.user_id records the real
+  // Supabase user; guests get null (guest checkout) — never an invented id.
+  const authState = useContext(AuthContext);
+  const authUserId: string | null = authState?.user?.id ?? null;
   const settings = StoreService.getSettings();
   // The server-published CMS config is the source of truth for shipping rules
   // so admin changes in Website Customize / Settings actually reach checkout,
@@ -272,6 +278,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (isCod) {
       try {
         const createdOrder = await StoreService.createOrder({
+          orderNumber: orderNum,
+          userId: authUserId ?? undefined,
           customerName: customerInfo.name,
           customerEmail: customerInfo.email,
           customerPhone: customerInfo.phone,
@@ -313,6 +321,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         showToast(`Order ${createdOrder.orderNumber} placed via Cash on Delivery!`, 'success');
         return createdOrder;
       } catch (err: any) {
+        console.error('[Checkout] COD order INSERT failed — customer must NOT see a success screen:', err);
         setPaymentErrorMessage(err.message || 'Failed to place COD order.');
         setIsProcessingPayment(false);
         return null;
@@ -351,33 +360,61 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const result = await CashfreeService.checkout(cfOrder.paymentSessionId);
 
         if (result.success) {
-          // 3. Mark payment_status = "paid" and create confirmed order
-          const createdOrder = await StoreService.createOrder({
-            customerName: customerInfo.name,
-            customerEmail: customerInfo.email,
-            customerPhone: customerInfo.phone,
-            shippingAddress: {
-              address: customerInfo.address,
-              city: customerInfo.city,
-              state: customerInfo.state,
-              pincode: customerInfo.pincode,
-              country: customerInfo.country || 'India',
-            },
-            subtotal: totalCartPrice,
-            discount: discountAmount,
-            shippingCost,
-            codFee: 0,
-            tax,
-            total: grandTotal,
-            currency: 'INR',
-            paymentMethod: 'cashfree',
-            paymentStatus: 'paid',
-            orderStatus: 'Confirmed',
-            items: orderItemsSnapshot,
-            cashfreeOrderId: cfOrder.orderId,
-            cashfreePaymentSessionId: cfOrder.paymentSessionId,
-            cashfreePaymentId: result.data?.paymentDetails?.paymentId || `cf_pay_${Date.now()}`,
-          });
+          // 3. Payment verified → create the order in Supabase. The customer
+          // only sees success AFTER the database confirmed the INSERT; if it
+          // fails we keep the gateway reference for recovery and never pretend
+          // the order was placed.
+          let createdOrder: Order;
+          try {
+            createdOrder = await StoreService.createOrder({
+              orderNumber: orderNum,
+              userId: authUserId ?? undefined,
+              customerName: customerInfo.name,
+              customerEmail: customerInfo.email,
+              customerPhone: customerInfo.phone,
+              shippingAddress: {
+                address: customerInfo.address,
+                city: customerInfo.city,
+                state: customerInfo.state,
+                pincode: customerInfo.pincode,
+                country: customerInfo.country || 'India',
+              },
+              subtotal: totalCartPrice,
+              discount: discountAmount,
+              shippingCost,
+              codFee: 0,
+              tax,
+              total: grandTotal,
+              currency: 'INR',
+              paymentMethod: 'cashfree',
+              paymentStatus: 'paid',
+              orderStatus: 'Confirmed',
+              items: orderItemsSnapshot,
+              cashfreeOrderId: cfOrder.orderId,
+              cashfreePaymentSessionId: cfOrder.paymentSessionId,
+              cashfreePaymentId: result.data?.paymentDetails?.paymentId || `cf_pay_${Date.now()}`,
+            });
+          } catch (saveErr: any) {
+            const cfPaymentId = result.data?.paymentDetails?.paymentId;
+            const reference = `Cashfree order ${cfOrder.orderId}${cfPaymentId ? `, payment ${cfPaymentId}` : ''}`;
+            console.error('[Checkout] Cashfree payment succeeded but the order INSERT failed:', {
+              message: saveErr?.message,
+              reference,
+            });
+            PaymentAuditService.log({
+              orderId: cfOrder.orderId,
+              orderNumber: orderNum,
+              paymentMethod: 'cashfree',
+              event: 'failure',
+              amount: grandTotal,
+              details: `Order save failed after successful payment (${reference}): ${saveErr?.message}`,
+            });
+            setPaymentErrorMessage(
+              `Your payment was received (${reference}) but the order could not be saved to the database. Please contact support with this reference — do not pay again.`
+            );
+            setIsProcessingPayment(false);
+            return null;
+          }
 
           PaymentAuditService.log({
             orderId: createdOrder.id,
@@ -410,6 +447,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return null;
         }
       } catch (err: any) {
+        console.error('[Checkout] Cashfree flow error:', err);
         setPaymentErrorMessage(err.message || 'Cashfree gateway error.');
         setIsProcessingPayment(false);
         return null;
@@ -483,6 +521,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
 
               const createdOrder = await StoreService.createOrder({
+                orderNumber: orderNum,
+                userId: authUserId ?? undefined,
                 customerName: customerInfo.name,
                 customerEmail: customerInfo.email,
                 customerPhone: customerInfo.phone,
@@ -527,7 +567,26 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
               showToast(`Payment successful! Order ${createdOrder.orderNumber} confirmed.`, 'success');
               resolve(createdOrder);
             } catch (err: any) {
-              setPaymentErrorMessage('Order creation failed. Please contact support.');
+              // Payment captured but the order row could not be saved: never
+              // claim success, log everything, keep the payment reference for
+              // recovery (createOrder is idempotent on the payment id, so a
+              // re-fired callback cannot create a duplicate order).
+              console.error('[Checkout] Razorpay payment succeeded but the order INSERT failed:', {
+                message: err?.message,
+                razorpayPaymentId: response?.razorpay_payment_id,
+                razorpayOrderId: response?.razorpay_order_id,
+              });
+              PaymentAuditService.log({
+                orderId: response?.razorpay_payment_id || response?.razorpay_order_id || serverRazorpayOrder.id,
+                orderNumber: orderNum,
+                paymentMethod: 'razorpay',
+                event: 'failure',
+                amount: grandTotal,
+                details: `Order save failed after successful payment (payment ${response?.razorpay_payment_id}): ${err?.message}`,
+              });
+              setPaymentErrorMessage(
+                `Payment succeeded (ID: ${response?.razorpay_payment_id}) but the order could not be saved to the database: ${err?.message} Please contact support with this payment ID — do not pay again.`
+              );
               setIsProcessingPayment(false);
               resolve(null);
             }

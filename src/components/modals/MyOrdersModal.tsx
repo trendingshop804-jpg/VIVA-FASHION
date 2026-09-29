@@ -12,18 +12,34 @@ interface MyOrdersModalProps {
 export const MyOrdersModal: React.FC<MyOrdersModalProps> = ({ isOpen, onClose }) => {
   const { currencySymbol, showToast } = useCart();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      StoreService.fetchOrders().then(data => {
-        setOrders(data);
+    if (!isOpen) return;
+    let active = true;
+    setLoadError(null);
+    // Signed-in customers load THEIR rows from Supabase; guests read this
+    // device's cache (there is no anon SELECT policy on orders by design).
+    StoreService.fetchMyOrders()
+      .then(data => {
+        if (active) setOrders(data);
+      })
+      .catch(err => {
+        console.error('[My Orders] Failed to load orders from Supabase:', err);
+        if (active) {
+          setOrders([]);
+          setLoadError((err as Error)?.message || 'Could not load your orders from the database.');
+        }
       });
-    }
+    return () => {
+      active = false;
+    };
   }, [isOpen]);
 
   // Customer self-service: cancel an order before it ships, or request a
-  // return once it has been delivered.
+  // return once it has been delivered. The status change only reports
+  // success after Supabase confirmed it.
   const handleOrderAction = async (ord: Order, next: OrderStatus) => {
     const isCancel = next === 'Cancelled';
     const verb = isCancel ? 'cancel' : 'request a return for';
@@ -39,8 +55,12 @@ export const MyOrdersModal: React.FC<MyOrdersModalProps> = ({ isOpen, onClose })
           : `Return requested for order ${ord.orderNumber}.`,
         'success'
       );
-    } catch {
-      showToast('Could not update the order. Please try again.', 'warn');
+    } catch (err) {
+      console.error('[My Orders] Status update failed:', err);
+      showToast(
+        (err as Error)?.message || 'Could not update the order. Please try again.',
+        'warn'
+      );
     } finally {
       setUpdatingId(null);
     }
@@ -70,6 +90,11 @@ export const MyOrdersModal: React.FC<MyOrdersModalProps> = ({ isOpen, onClose })
 
           {/* Body */}
           <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+            {loadError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-lg">
+                {loadError}
+              </div>
+            )}
             {orders.length === 0 ? (
               <div className="text-center py-10 text-[#71717A] space-y-2">
                 <ShoppingBag size={32} className="mx-auto text-[#DEC3B5]" />

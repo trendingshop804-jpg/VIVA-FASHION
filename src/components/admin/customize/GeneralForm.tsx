@@ -150,6 +150,22 @@ export const GeneralForm: React.FC = () => {
             />
           </div>
         </div>
+
+        <label className="flex items-center gap-3 cursor-pointer select-none bg-white p-3 rounded-lg border border-[#DEC3B5]">
+          <span className="relative inline-flex items-center cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={general.shippingFeeEnabled !== false}
+              onChange={(e) => updateDraft('general', { shippingFeeEnabled: e.target.checked })}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-gray-300 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#C27D6E]"></div>
+          </span>
+          <span>
+            <span className="font-bold text-[#191E28] text-xs block">Shipping Charges (fee below threshold)</span>
+            <span className="text-[10px] text-[#7A7A7A]">Turn OFF to make every order ship free — removes the flat fee from checkout.</span>
+          </span>
+        </label>
       </div>
 
       {/* Contact Info */}

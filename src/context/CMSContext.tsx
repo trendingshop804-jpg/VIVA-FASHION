@@ -27,6 +27,10 @@ interface CMSContextType {
 }
 
 const CMSContext = createContext<CMSContextType | undefined>(undefined);
+// Exported raw context so critical consumers (CartContext/checkout) can read
+// config optionally instead of crashing when the provider isn't mounted yet
+// (e.g. Fast Refresh module swaps during development).
+export { CMSContext };
 
 export const CMSProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [draftConfig, setDraftConfig] = useState<WebsiteCustomizationConfig>(DEFAULT_WEBSITE_CONFIG);
@@ -46,6 +50,17 @@ export const CMSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     reloadCMS();
+
+    // Auto-refresh when another tab publishes (admin Settings / Customize
+    // saves write this key) so the open storefront tab shows changes at once
+    // instead of requiring a manual page refresh.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'vf_cms_published_config') {
+        reloadCMS();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // Update CSS Variables dynamically whenever active published or draft config changes

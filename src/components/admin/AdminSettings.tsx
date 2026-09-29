@@ -1,17 +1,67 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Save, Store, Mail, Globe, MessageCircle, Truck, CreditCard, Banknote, ShieldCheck } from 'lucide-react';
 import { useAdmin } from '../../context/AdminContext';
 import { useCart } from '../../context/CartContext';
+import { useCMS } from '../../context/CMSContext';
+import { CMSService } from '../../services/cmsService';
 
 export const AdminSettings: React.FC = () => {
   const { settings, updateSettings } = useAdmin();
   const { showToast } = useCart();
+  const { activeConfig, reloadCMS, isUnsaved } = useCMS();
   const [formData, setFormData] = useState(settings);
+  const [shippingFeeEnabled, setShippingFeeEnabled] = useState(true);
 
-  const handleSave = (e: React.FormEvent) => {
+  // Sync this form with the LIVE website config (site_settings) so what the
+  // admin sees here is exactly what customers see on the storefront.
+  useEffect(() => {
+    const g = activeConfig?.general;
+    if (!g) return;
+    setShippingFeeEnabled(g.shippingFeeEnabled !== false);
+    setFormData(prev => ({
+      ...prev,
+      storeName: g.storeName || prev.storeName,
+      storeLogo: g.logoUrl || prev.storeLogo,
+      storeDescription: g.storeDescription || prev.storeDescription,
+      currencySymbol: g.currencySymbol || prev.currencySymbol,
+      freeShippingThreshold: g.freeShippingThreshold || prev.freeShippingThreshold,
+      supportEmail: g.email || prev.supportEmail,
+      supportPhone: g.phone || prev.supportPhone,
+      address: g.address || prev.address,
+      whatsapp: g.whatsapp || prev.whatsapp,
+    }));
+  }, [activeConfig]);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings(formData);
-    showToast('Store settings saved successfully', 'success');
+    updateSettings(formData); // localStorage (payment rules, checkout fallbacks)
+
+    // Publish the storefront fields to site_settings — this is what the
+    // website actually renders, so Settings-tab edits now reach the site.
+    try {
+      const next = CMSService.mergeWithDefault({
+        ...activeConfig,
+        general: {
+          ...activeConfig.general,
+          storeName: formData.storeName || activeConfig.general.storeName,
+          storeDescription: formData.storeDescription || activeConfig.general.storeDescription,
+          logoUrl: formData.storeLogo || activeConfig.general.logoUrl,
+          currencySymbol: formData.currencySymbol || activeConfig.general.currencySymbol,
+          freeShippingThreshold: Number(formData.freeShippingThreshold) || activeConfig.general.freeShippingThreshold,
+          email: formData.supportEmail || activeConfig.general.email,
+          phone: formData.supportPhone || activeConfig.general.phone,
+          address: formData.address || activeConfig.general.address,
+          whatsapp: formData.whatsapp || activeConfig.general.whatsapp,
+          shippingFeeEnabled,
+        },
+      });
+      const published = await CMSService.publishConfig(next);
+      // Skip reloading while Customize has unsaved draft edits so we don't
+      // discard the admin's in-progress work.
+      if (published && !isUnsaved) await reloadCMS();
+    } catch { /* local save above still applied */ }
+
+    showToast('Store settings saved & published to website', 'success');
   };
 
   return (
@@ -364,6 +414,32 @@ export const AdminSettings: React.FC = () => {
               />
             </div>
           </div>
+
+          {/* Shipping fee on/off — publishes to the live website on Save */}
+          <label className="flex items-center gap-3 cursor-pointer select-none bg-[#FAF7F2] p-3 rounded-xl border border-[#DEC3B5]">
+            <span className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={shippingFeeEnabled}
+                onChange={(e) => setShippingFeeEnabled(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:border-gray-300 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#C27D6E]"></div>
+            </span>
+            <span>
+              <span className="font-bold text-[#191E28] text-xs flex items-center gap-1.5">
+                <Truck size={14} className="text-[#C27D6E]" /> Shipping Charges (flat fee below threshold)
+              </span>
+              <span className="text-[10px] text-[#7A7A7A] block">Turn OFF to make every order ship free — removes the flat fee from checkout.</span>
+            </span>
+            <span className={`ml-auto text-[10px] px-2.5 py-0.5 rounded-full font-bold border uppercase tracking-wider ${
+              shippingFeeEnabled
+                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                : 'bg-gray-100 text-gray-500 border-gray-300'
+            }`}>
+              {shippingFeeEnabled ? 'ON / CHARGED' : 'OFF / ALL FREE'}
+            </span>
+          </label>
 
           <div>
             <label className="font-bold text-[#191E28] block mb-1">Shipping Policy Information</label>

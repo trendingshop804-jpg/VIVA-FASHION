@@ -976,9 +976,24 @@ export const StoreService = {
     const updated = orders.map(o => o.id === orderId ? { ...o, orderStatus: status, updatedAt: new Date().toISOString() } : o);
     localStorage.setItem('vf_orders', JSON.stringify(updated));
 
-    const { error: statusSyncError } = await supabase.from('orders').update({ order_status: status, updated_at: new Date().toISOString() }).eq('id', orderId);
-    if (statusSyncError) {
-      console.warn('Order status saved locally but Supabase sync failed:', statusSyncError.message);
+    // Legacy localStorage-only orders use ids like "ord-2" that aren't UUIDs and
+    // don't exist server-side; syncing them sends an invalid id filter (HTTP 400).
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
+      // Prefer the customer-safe RPC (migration SECTION 5): signed-in customers
+      // may only cancel/return their OWN orders through allowed transitions.
+      // It fails for admins/guests (and while the function doesn't exist yet),
+      // so on any RPC error we fall back to a direct UPDATE — admin sessions
+      // sync fine; guests stay local-only because RLS blocks anon updates.
+      const { error: rpcError } = await supabase.rpc('customer_order_status_change', {
+        p_order_id: orderId,
+        p_new_status: status,
+      });
+      if (rpcError) {
+        const { error: statusSyncError } = await supabase.from('orders').update({ order_status: status, updated_at: new Date().toISOString() }).eq('id', orderId);
+        if (statusSyncError) {
+          console.warn('Order status saved locally but Supabase sync failed:', statusSyncError.message);
+        }
+      }
     }
 
     return true;
@@ -1002,14 +1017,17 @@ export const StoreService = {
     });
     localStorage.setItem('vf_orders', JSON.stringify(updated));
 
-    const { error: paySyncError } = await supabase.from('orders').update({
-      payment_status: paymentStatus,
-      razorpay_payment_id: extraDetails?.razorpayPaymentId,
-      cashfree_payment_id: extraDetails?.cashfreePaymentId,
-      updated_at: new Date().toISOString(),
-    }).eq('id', orderId);
-    if (paySyncError) {
-      console.warn('Payment status saved locally but Supabase sync failed:', paySyncError.message);
+    // Same non-UUID guard as updateOrderStatus: legacy local orders stay local-only.
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
+      const { error: paySyncError } = await supabase.from('orders').update({
+        payment_status: paymentStatus,
+        razorpay_payment_id: extraDetails?.razorpayPaymentId,
+        cashfree_payment_id: extraDetails?.cashfreePaymentId,
+        updated_at: new Date().toISOString(),
+      }).eq('id', orderId);
+      if (paySyncError) {
+        console.warn('Payment status saved locally but Supabase sync failed:', paySyncError.message);
+      }
     }
 
     return true;

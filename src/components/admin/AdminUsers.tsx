@@ -154,10 +154,10 @@ export const AdminUsers: React.FC = () => {
                     <tr key={adm.id} className="hover:bg-[#FAF7F2]/80 transition-colors">
                       <td className="py-3.5 px-4 font-bold text-[#191E28] flex items-center gap-2">
                         <div className="w-7 h-7 rounded-full bg-[#F5EBE6] text-[#C27D6E] flex items-center justify-center font-bold">
-                          {adm.name.charAt(0).toUpperCase()}
+                          {(adm.name || adm.email || '?').charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <span>{adm.name}</span>
+                          <span>{adm.name || adm.email}</span>
                           {isCurrent && (
                             <span className="text-[9px] bg-[#C27D6E]/10 text-[#A66355] font-bold px-1.5 py-0.2 rounded ml-1.5 border border-[#C27D6E]/30">
                               You

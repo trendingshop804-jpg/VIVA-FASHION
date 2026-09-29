@@ -50,15 +50,16 @@ export const CartDrawer: React.FC = () => {
 
   const settings = StoreService.getSettings();
 
-  // Address Form State
+  // Address Form State — start empty so demo/seed data is never shown to
+  // real customers; only the country has a sensible default.
   const [formData, setFormData] = useState({
-    name: 'Pooja Sharma',
-    email: 'pooja.sharma@example.com',
-    phone: '+91 98765 43210',
-    address: '45 MG Road, Indiranagar',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    pincode: '560038',
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: '',
+    state: '',
+    pincode: '',
     country: 'India',
   });
 

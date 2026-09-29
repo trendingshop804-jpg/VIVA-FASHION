@@ -40,6 +40,14 @@ export const AdminOrders: React.FC = () => {
   });
 
   const handleStatusChange = async (orderId: string, newStatus: OrderStatus) => {
+    // Destructive transitions need an explicit confirmation so a stray click
+    // can't cancel or return a customer's order.
+    if (newStatus === 'Cancelled' || newStatus === 'Returned') {
+      const label = newStatus === 'Cancelled' ? 'cancel' : 'mark as returned';
+      if (!window.confirm(`Are you sure you want to ${label} this order? The customer will see the updated status.`)) {
+        return;
+      }
+    }
     setUpdatingId(orderId);
     try {
       await StoreService.updateOrderStatus(orderId, newStatus);
@@ -87,6 +95,8 @@ export const AdminOrders: React.FC = () => {
         return 'bg-amber-100 text-amber-800 border-amber-200';
       case 'Cancelled':
         return 'bg-red-100 text-red-800 border-red-200';
+      case 'Returned':
+        return 'bg-orange-100 text-orange-800 border-orange-200';
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200';
     }
@@ -151,6 +161,7 @@ export const AdminOrders: React.FC = () => {
             <option value="Shipped">Shipped</option>
             <option value="Delivered">Delivered</option>
             <option value="Cancelled">Cancelled</option>
+            <option value="Returned">Returned</option>
           </select>
 
           <select
@@ -248,6 +259,7 @@ export const AdminOrders: React.FC = () => {
                         <option value="Shipped">Shipped</option>
                         <option value="Delivered">Delivered</option>
                         <option value="Cancelled">Cancelled</option>
+                        <option value="Returned">Returned</option>
                       </select>
                     </td>
 

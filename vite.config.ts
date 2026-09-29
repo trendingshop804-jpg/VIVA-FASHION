@@ -14,13 +14,14 @@ export default defineConfig(({ mode }) => {
   const RAZORPAY_KEY_SECRET = env.VITE_RAZORPAY_KEY_SECRET || ''
 
   function cashfreeApiPlugin(): Plugin {
-    return {
-      name: 'cashfree-api-server',
-      configureServer(server) {
-        server.middlewares.use(async (req, res, next) => {
+    // Shared API middleware: active in `vite dev` (configureServer)
+    // and `vite preview` (configurePreviewServer), so /api/* endpoints
+    // (Cashfree + Razorpay order creation / signature verify) work
+    // for both development and local production testing.
+    const paymentApiMiddleware = async (req: any, res: any, next: () => void) => {
           if (req.url === '/api/create-cashfree-order' && req.method === 'POST') {
             let body = ''
-            req.on('data', (chunk) => { body += chunk })
+            req.on('data', (chunk: Buffer) => { body += chunk })
             req.on('end', async () => {
               try {
                 const orderData = JSON.parse(body)
@@ -100,7 +101,7 @@ export default defineConfig(({ mode }) => {
 
           if (req.url === '/api/create-razorpay-order' && req.method === 'POST') {
             let body = ''
-            req.on('data', (chunk) => { body += chunk })
+            req.on('data', (chunk: Buffer) => { body += chunk })
             req.on('end', async () => {
               try {
                 const { amount, receipt, notes } = JSON.parse(body)
@@ -134,7 +135,7 @@ export default defineConfig(({ mode }) => {
 
           if (req.url === '/api/verify-razorpay-signature' && req.method === 'POST') {
             let body = ''
-            req.on('data', (chunk) => { body += chunk })
+            req.on('data', (chunk: Buffer) => { body += chunk })
             req.on('end', () => {
               try {
                 const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = JSON.parse(body)
@@ -156,7 +157,15 @@ export default defineConfig(({ mode }) => {
           }
 
           next()
-        })
+    }
+
+    return {
+      name: 'payment-api-server',
+      configureServer(server) {
+        server.middlewares.use(paymentApiMiddleware)
+      },
+      configurePreviewServer(server) {
+        server.middlewares.use(paymentApiMiddleware)
       },
     }
   }

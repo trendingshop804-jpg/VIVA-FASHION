@@ -17,7 +17,15 @@ import { AdminUsers } from './AdminUsers';
 import { ShieldAlert, ArrowLeft, Loader2 } from 'lucide-react';
 
 export const AdminLayout: React.FC = () => {
-  const { activeAdminTab, setIsAdminMode } = useAdmin();
+  const {
+    activeAdminTab,
+    setIsAdminMode,
+    refreshProducts,
+    refreshOrders,
+    refreshCustomers,
+    refreshCoupons,
+    refreshReviews,
+  } = useAdmin();
   const { isAdmin, isAuthenticated, isLoading, setIsAuthModalOpen, setAuthModalTab } = useAuth();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -30,6 +38,20 @@ export const AdminLayout: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [isLoading, isAuthenticated, isAdmin]);
+
+  // The AdminProvider data fetch runs once at app mount, when we're still a
+  // guest — RLS then hides server rows (orders, customers, ...). Re-fetch
+  // everything as soon as the admin session is known so the panel shows live
+  // data without requiring a full page reload.
+  useEffect(() => {
+    if (isAuthenticated && isAdmin) {
+      refreshProducts();
+      refreshOrders();
+      refreshCustomers();
+      refreshCoupons();
+      refreshReviews();
+    }
+  }, [isAuthenticated, isAdmin]);
 
   if (isLoading) {
     return (

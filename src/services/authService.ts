@@ -252,7 +252,10 @@ export const AuthService = {
       if (!error && data) {
         return data.map((p: any) => ({
           id: p.id,
-          name: p.name,
+          // Profiles created without a display name (or via raw SQL) can have
+          // NULL name — fall back like the rest of the auth flows do, so the
+          // admin table never crashes on .charAt of undefined.
+          name: p.name || p.full_name || (p.email ? String(p.email).split('@')[0] : 'Administrator'),
           email: p.email,
           phone: p.phone,
           role: p.role,

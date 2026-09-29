@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { X, ShoppingBag, CreditCard, Banknote, Calendar } from 'lucide-react';
+import { X, ShoppingBag, CreditCard, Banknote, Calendar, Ban, Undo2 } from 'lucide-react';
 import { StoreService } from '../../services/storeService';
 import { useCart } from '../../context/CartContext';
-import type { Order } from '../../types';
+import type { Order, OrderStatus } from '../../types';
 
 interface MyOrdersModalProps {
   isOpen: boolean;
@@ -10,8 +10,9 @@ interface MyOrdersModalProps {
 }
 
 export const MyOrdersModal: React.FC<MyOrdersModalProps> = ({ isOpen, onClose }) => {
-  const { currencySymbol } = useCart();
+  const { currencySymbol, showToast } = useCart();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -20,6 +21,30 @@ export const MyOrdersModal: React.FC<MyOrdersModalProps> = ({ isOpen, onClose })
       });
     }
   }, [isOpen]);
+
+  // Customer self-service: cancel an order before it ships, or request a
+  // return once it has been delivered.
+  const handleOrderAction = async (ord: Order, next: OrderStatus) => {
+    const isCancel = next === 'Cancelled';
+    const verb = isCancel ? 'cancel' : 'request a return for';
+    if (!window.confirm(`Are you sure you want to ${verb} order ${ord.orderNumber}?`)) return;
+
+    setUpdatingId(ord.id);
+    try {
+      await StoreService.updateOrderStatus(ord.id, next);
+      setOrders(prev => prev.map(o => o.id === ord.id ? { ...o, orderStatus: next, updatedAt: new Date().toISOString() } : o));
+      showToast(
+        isCancel
+          ? `Order ${ord.orderNumber} has been cancelled.`
+          : `Return requested for order ${ord.orderNumber}.`,
+        'success'
+      );
+    } catch {
+      showToast('Could not update the order. Please try again.', 'warn');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -111,6 +136,30 @@ export const MyOrdersModal: React.FC<MyOrdersModalProps> = ({ isOpen, onClose })
                       </div>
                     ))}
                   </div>
+
+                  {/* Cancel / Return self-service actions */}
+                  {(['Pending', 'Confirmed', 'Processing', 'Packed'].includes(ord.orderStatus) || ord.orderStatus === 'Delivered') && (
+                    <div className="flex items-center gap-2 pt-2 border-t border-[#FAF4EC]">
+                      {['Pending', 'Confirmed', 'Processing', 'Packed'].includes(ord.orderStatus) && (
+                        <button
+                          onClick={() => handleOrderAction(ord, 'Cancelled')}
+                          disabled={updatingId === ord.id}
+                          className="flex items-center gap-1.5 bg-white border border-red-200 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors disabled:opacity-50"
+                        >
+                          <Ban size={12} /> Cancel Order
+                        </button>
+                      )}
+                      {ord.orderStatus === 'Delivered' && (
+                        <button
+                          onClick={() => handleOrderAction(ord, 'Returned')}
+                          disabled={updatingId === ord.id}
+                          className="flex items-center gap-1.5 bg-white border border-orange-200 text-orange-600 hover:bg-orange-50 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors disabled:opacity-50"
+                        >
+                          <Undo2 size={12} /> Return Order
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))
             )}

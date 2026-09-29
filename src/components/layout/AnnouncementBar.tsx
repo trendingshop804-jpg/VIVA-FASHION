@@ -46,14 +46,12 @@ export const AnnouncementBar: React.FC = () => {
         <button
           onClick={() => setIsCartOpen(true)}
           className="relative flex items-center gap-1 hover:text-[#F8C8DC] transition-colors"
+          aria-label={`Cart (${totalCartItems} items)`}
         >
           <ShoppingBag size={13} />
-          <span className="hidden sm:inline">Cart</span>
-          {totalCartItems > 0 && (
-            <span className="absolute -top-1.5 -right-2 w-4 h-4 bg-[#C2185B] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-              {totalCartItems}
-            </span>
-          )}
+          <span className="absolute -top-1.5 -right-2 w-4 h-4 bg-white text-[#3A1F2E] text-[9px] font-bold rounded-full flex items-center justify-center">
+            {totalCartItems}
+          </span>
         </button>
       </div>
     </div>

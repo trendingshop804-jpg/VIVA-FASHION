@@ -30,10 +30,11 @@ export const CMSService = {
         .from('site_settings')
         .select('*')
         .eq('id', 'published_config')
-        .single();
+        .limit(1);
 
-      if (!error && data && data.config) {
-        const migrated = migrateDesign(data.config);
+      const row = data?.[0];
+      if (!error && row && row.config) {
+        const migrated = migrateDesign(row.config);
         if (migrated) {
           const merged = this.mergeWithDefault(migrated);
           localStorage.setItem(PUBLISHED_KEY, JSON.stringify(merged));
@@ -66,10 +67,11 @@ export const CMSService = {
         .from('site_settings')
         .select('*')
         .eq('id', 'draft_config')
-        .single();
+        .limit(1);
 
-      if (!error && data && data.config) {
-        const migrated = migrateDesign(data.config);
+      const row = data?.[0];
+      if (!error && row && row.config) {
+        const migrated = migrateDesign(row.config);
         if (migrated) {
           const merged = this.mergeWithDefault(migrated);
           localStorage.setItem(DRAFT_KEY, JSON.stringify(merged));

@@ -5,7 +5,7 @@ import { useCMS } from '../../context/CMSContext';
 
 export const AboutSection: React.FC = () => {
   const { setSelectedCategory } = useUI();
-  const { currencySymbol, freeShippingThreshold } = useCart();
+  const { currencySymbol, freeShippingThreshold, shippingFeeEnabled } = useCart();
   const { activeConfig } = useCMS();
   const about = activeConfig?.aboutUs;
 
@@ -36,7 +36,9 @@ export const AboutSection: React.FC = () => {
 
         <p className="text-xs text-[#71717A] max-w-xl mx-auto">
           {about?.additionalText ||
-            `Experience authentic silhouettes reimagined for ultimate daily ease. Enjoy complimentary shipping across India on qualifying orders over ${currencySymbol}${freeShippingThreshold}.`}
+            (shippingFeeEnabled
+              ? `Experience authentic silhouettes reimagined for ultimate daily ease. Enjoy complimentary shipping across India on qualifying orders over ${currencySymbol}${freeShippingThreshold}.`
+              : 'Experience authentic silhouettes reimagined for ultimate daily ease. Enjoy complimentary express shipping across India on all orders.')}
         </p>
 
         <div className="pt-2">

@@ -101,6 +101,8 @@ export interface WebsiteCustomizationConfig {
     address: string;
     currencySymbol: string;
     freeShippingThreshold: number;
+    /** When false every order ships free (no ₹80 fee below the threshold) */
+    shippingFeeEnabled: boolean;
     announcementText: string;
     isAnnouncementVisible: boolean;
     announcementBgColor: string;

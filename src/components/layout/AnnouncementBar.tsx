@@ -6,7 +6,7 @@ import { useUI } from '../../context/UIContext';
 import { useAuth } from '../../context/AuthContext';
 
 export const AnnouncementBar: React.FC = () => {
-  const { currencySymbol, freeShippingThreshold, totalCartItems } = useCart();
+  const { currencySymbol, freeShippingThreshold, totalCartItems, shippingFeeEnabled } = useCart();
   const { activeConfig } = useCMS();
   const { setIsCartOpen } = useUI();
   const { setIsAuthModalOpen, isAuthenticated, profile } = useAuth();
@@ -21,7 +21,11 @@ export const AnnouncementBar: React.FC = () => {
       {/* Left: Free Shipping */}
       <div className="flex items-center gap-1.5">
         <Truck size={13} />
-        <span className="hidden sm:inline">Free Shipping on Orders Above {currencySymbol}{freeShippingThreshold}</span>
+        <span className="hidden sm:inline">
+          {shippingFeeEnabled
+            ? `Free Shipping on Orders Above ${currencySymbol}${freeShippingThreshold}`
+            : 'Free Shipping on All Orders'}
+        </span>
         <span className="sm:hidden">Free Shipping</span>
       </div>
 

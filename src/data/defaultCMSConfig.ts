@@ -21,6 +21,7 @@ export const DEFAULT_WEBSITE_CONFIG: WebsiteCustomizationConfig = {
     address: 'Fashion Street, MG Road, Bengaluru, Karnataka, 560001',
     currencySymbol: '₹',
     freeShippingThreshold: 999,
+    shippingFeeEnabled: true,
     announcementText: 'Free Shipping on Orders Above ₹999',
     isAnnouncementVisible: true,
     announcementBgColor: '#3A1F2E',

@@ -4,6 +4,7 @@ import { StoreService } from '../services/storeService';
 import { loadRazorpayScript, getRazorpayKeyId, RazorpayServerService } from '../services/razorpayService';
 import { CashfreeService, PaymentAuditService } from '../services/cashfreeService';
 import { VisitorAnalyticsService } from '../services/visitorAnalytics';
+import { useCMS } from './CMSContext';
 
 interface CustomerAddressInfo {
   name: string;
@@ -31,6 +32,8 @@ interface CartContextType {
   freeShippingThreshold: number;
   amountUntilFreeShipping: number;
   hasFreeShipping: boolean;
+  /** false = shipping fee disabled by admin; every order ships free */
+  shippingFeeEnabled: boolean;
   toastMessage: { text: string; type: 'success' | 'info' | 'warn' } | null;
   showToast: (text: string, type?: 'success' | 'info' | 'warn') => void;
   
@@ -53,9 +56,15 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { activeConfig } = useCMS();
   const settings = StoreService.getSettings();
-  const freeShippingThreshold = settings.freeShippingThreshold || 999;
-  const currencySymbol = settings.currencySymbol || '₹';
+  // The server-published CMS config is the source of truth for shipping rules
+  // so admin changes in Website Customize / Settings actually reach checkout,
+  // banners and the free-shipping meter (localStorage stays as fallback).
+  const cmsGeneral = activeConfig?.general;
+  const shippingFeeEnabled = cmsGeneral?.shippingFeeEnabled !== false;
+  const freeShippingThreshold = cmsGeneral?.freeShippingThreshold || settings.freeShippingThreshold || 999;
+  const currencySymbol = cmsGeneral?.currencySymbol || settings.currencySymbol || '₹';
 
   const [cart, setCart] = useState<CartItem[]>(() => {
     try {
@@ -183,8 +192,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const totalCartItems = cart.reduce((sum, item) => sum + item.quantity, 0);
   const totalCartPrice = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  const amountUntilFreeShipping = Math.max(0, freeShippingThreshold - totalCartPrice);
-  const hasFreeShipping = totalCartPrice >= freeShippingThreshold;
+  const amountUntilFreeShipping = shippingFeeEnabled ? Math.max(0, freeShippingThreshold - totalCartPrice) : 0;
+  const hasFreeShipping = !shippingFeeEnabled || totalCartPrice >= freeShippingThreshold;
 
   // Process Checkout for Cashfree, Razorpay & COD
   const processCheckout = async (customerInfo: CustomerAddressInfo): Promise<Order | null> => {
@@ -563,6 +572,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         freeShippingThreshold,
         amountUntilFreeShipping,
         hasFreeShipping,
+        shippingFeeEnabled,
         toastMessage,
         showToast,
         selectedPaymentMethod,

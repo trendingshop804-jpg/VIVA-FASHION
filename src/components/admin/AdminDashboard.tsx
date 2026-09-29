@@ -22,7 +22,7 @@ import { VisitorAnalyticsService } from '../../services/visitorAnalytics';
 import type { VisitorStats, VisitorActivity } from '../../types';
 
 export const AdminDashboard: React.FC = () => {
-  const { products, orders, customers, setActiveAdminTab } = useAdmin();
+  const { products, orders, customers, setActiveAdminTab, refreshOrders } = useAdmin();
   const { currencySymbol } = useCart();
 
   const [visitorStats, setVisitorStats] = useState<VisitorStats>(VisitorAnalyticsService.getStats());
@@ -31,6 +31,9 @@ export const AdminDashboard: React.FC = () => {
   useEffect(() => {
     setVisitorStats(VisitorAnalyticsService.getStats());
     setVisitorActivities(VisitorAnalyticsService.getActivities());
+    // Re-fetch orders so Recent Store Orders / pending counts include orders
+    // placed after the admin panel first loaded.
+    refreshOrders();
   }, []);
 
   // Metrics Calculation

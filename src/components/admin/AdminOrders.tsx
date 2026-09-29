@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShoppingBag,
   Search,
@@ -23,6 +23,16 @@ export const AdminOrders: React.FC = () => {
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+  // Keep the orders list live: refetch whenever this view opens and keep
+  // polling while it stays visible, so newly placed customer orders show up
+  // without requiring a manual page reload.
+  useEffect(() => {
+    refreshOrders();
+    const timer = window.setInterval(() => refreshOrders(), 20000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredOrders = orders.filter(o => {
     const matchesSearch =

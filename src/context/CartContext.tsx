@@ -4,7 +4,7 @@ import { StoreService } from '../services/storeService';
 import { loadRazorpayScript, getRazorpayKeyId, RazorpayServerService } from '../services/razorpayService';
 import { CashfreeService, PaymentAuditService } from '../services/cashfreeService';
 import { VisitorAnalyticsService } from '../services/visitorAnalytics';
-import { useCMS } from './CMSContext';
+import { CMSContext } from './CMSContext';
 
 interface CustomerAddressInfo {
   name: string;
@@ -56,7 +56,10 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { activeConfig } = useCMS();
+  // Read the CMS config defensively (never throws) so checkout keeps working
+  // even if the provider isn't mounted — falls back to defaults below.
+  const cms = useContext(CMSContext);
+  const activeConfig = cms?.activeConfig;
   const settings = StoreService.getSettings();
   // The server-published CMS config is the source of truth for shipping rules
   // so admin changes in Website Customize / Settings actually reach checkout,
